@@ -208,6 +208,9 @@ $("btn-animate").addEventListener("click", async () => {
 function renderResult(r) {
   const img = $("preview-img");
   img.src = `/api/preview/${r.job}?t=${Date.now()}`;
+  // The mascot is the point of the page, so describe what was actually made
+  // rather than leaving a generic label a screen reader would skip.
+  img.alt = `Your mascot animated: ${r.job}, ${r.frames} frames at ${r.fps} fps`;
   img.hidden = false;
   $("preview-empty").hidden = true;
   $("preview-cap").textContent = `${r.job} · ${r.frames} frames · ${r.fps} fps`;
