@@ -38,6 +38,16 @@ DEFAULT_MODELS = {
 # Shown before spending, per image. Deliberately rough.
 ROUGH_COST_USD = {"openai": 0.04, "gemini": 0.04, "fal": 0.04, "replicate": 0.04}
 
+# Split out so a proxy or self-hosted gateway can be pointed at, and so the
+# adapters can be exercised against a stub. Response parsing is where adapter
+# bugs actually live, and it is testable without a key.
+BASE_URLS = {
+    "openai": "https://api.openai.com/v1",
+    "gemini": "https://generativelanguage.googleapis.com/v1beta",
+    "fal": "https://queue.fal.run",
+    "replicate": "https://api.replicate.com/v1",
+}
+
 
 class ProviderError(RuntimeError):
     pass
@@ -119,13 +129,13 @@ def _openai(key, model, prompt, size, reference, timeout) -> bytes:
     with httpx.Client(timeout=timeout) as c:
         if reference is None:
             r = c.post(
-                "https://api.openai.com/v1/images/generations",
+                f"{BASE_URLS['openai']}/images/generations",
                 headers={**headers, "Content-Type": "application/json"},
                 json={"model": model, "prompt": prompt, "size": size, "n": 1},
             )
         else:
             r = c.post(
-                "https://api.openai.com/v1/images/edits",
+                f"{BASE_URLS['openai']}/images/edits",
                 headers=headers,
                 data={"model": model, "prompt": prompt, "size": size, "n": "1"},
                 files={"image": ("reference.png", reference, "image/png")},
@@ -165,7 +175,7 @@ def _gemini(key, model, prompt, size, reference, timeout) -> bytes:
 
     with httpx.Client(timeout=timeout) as c:
         r = c.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+            f"{BASE_URLS['gemini']}/models/{model}:generateContent",
             headers={"x-goog-api-key": key, "Content-Type": "application/json"},
             json={
                 "contents": [{"role": "user", "parts": parts}],
@@ -203,7 +213,7 @@ def _fal(key, model, prompt, size, reference, timeout, poll: float = 2.0) -> byt
         payload["image_urls"] = [_data_uri(reference)]
 
     with httpx.Client(timeout=timeout) as c:
-        r = c.post(f"https://queue.fal.run/{model}", headers=headers, json=payload)
+        r = c.post(f"{BASE_URLS['fal']}/{model}", headers=headers, json=payload)
         _raise_for(r, "fal", model)
         job = r.json()
         status_url, result_url = job.get("status_url"), job.get("response_url")
@@ -240,7 +250,7 @@ def _replicate(key, model, prompt, size, reference, timeout, poll: float = 2.0) 
 
     with httpx.Client(timeout=timeout) as c:
         r = c.post(
-            f"https://api.replicate.com/v1/models/{model}/predictions",
+            f"{BASE_URLS['replicate']}/models/{model}/predictions",
             headers=headers,
             json={"input": inp},
         )

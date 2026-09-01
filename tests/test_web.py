@@ -1,9 +1,10 @@
 """Web app tests.
 
-The provider call is the only part that needs a key, so it is the only part
-stubbed. Everything else runs for real against the same pipeline the CLI uses —
-which is the property worth protecting: if the web path ever grows its own
-keying or export logic, these tests still pass while the outputs diverge.
+The provider call is the only part that needs a key, so it is the only part left
+out here; test_providers.py covers it against a stub. Everything else runs for
+real against the same pipeline the CLI uses — which is the property worth
+protecting: if the web path ever grows its own keying or export logic, these
+tests still pass while the outputs diverge.
 """
 
 from __future__ import annotations

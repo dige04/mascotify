@@ -4,10 +4,14 @@ Turn one character image into production-ready animated mascot assets — sprite
 sheets, animated WebP, Lottie, and bundles for iOS, Android, web, Unity and
 Godot.
 
-**No API key.** In the default mode your coding agent is the image provider:
+**No API key on the CLI path.** Your coding agent is the image provider:
 mascotify compiles the prompt, the agent's own image tool draws it, mascotify
 measures the result and exports it. Codex's built-in `image_gen`, or any agent
 that can generate an image, is enough.
+
+The web app is the exception — a browser has no agent to draw with, so
+`mascotify serve` wants a provider key unless you feed it a sheet you already
+generated.
 
 ```bash
 uv tool install mascotify
@@ -37,7 +41,13 @@ There is a key-free route through it too: generate a sheet with your coding
 agent, then drop it into step 2. Validation, preview and export are identical —
 the browser only ever replaces the drawing step.
 
-## What makes this different from a hosted product
+**Status of the provider adapters:** each one is tested against a stub serving
+its documented response shape, which proves mascotify builds the request and
+finds the image correctly. The shapes themselves have **not** been checked
+against live accounts, and model catalogues move — if a call fails, the error
+names the cause and settings takes a current model id.
+
+## What the CLI path gives you that a hosted product cannot
 
 **It writes into your repo.** From the CLI, exports are not a zip in your Downloads folder.
 `ingest` drops an Xcode `.imageset` with a SwiftUI view, a `res/drawable` WebP
@@ -50,6 +60,9 @@ prompt, not an error. And because the caller is a multimodal agent, it can also
 *look* at the sheet and catch the things geometry cannot — a broken hand, a
 wave that reads as a salute — then reroll. A hosted product charges you for
 that pass.
+
+The web app runs the same validator and shows the same numbers, but the reroll
+is yours to press.
 
 ## How it works
 
