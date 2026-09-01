@@ -59,13 +59,19 @@ jobs:
       # SKILL.md is a data file, not a module. It has been silently dropped
       # from a wheel before in projects laid out like this, and the failure
       # only shows up when a user runs `mascotify install-skill`.
-      - name: Verify the skill ships in the wheel
+      # Data files have broken this twice: once missing from the wheel, once
+      # added twice by a redundant force-include, which fails the build outright.
+      - name: Verify the data files ship in the wheel
         run: |
           python -c "
           import glob, zipfile
           names = zipfile.ZipFile(glob.glob('dist/*.whl')[0]).namelist()
-          assert any(n.endswith('assets/SKILL.md') for n in names), names
-          print('SKILL.md present in wheel')
+          need = ['assets/SKILL.md', 'web/static/index.html',
+                  'web/static/app.css', 'web/static/app.js']
+          for want in need:
+              assert any(n.endswith(want) for n in names), (want, names)
+          assert len(names) == len(set(names)), 'duplicate entries in wheel'
+          print('all data files present, no duplicates')
           "
 
       - name: Install from the wheel and smoke-test the CLI
@@ -74,3 +80,18 @@ jobs:
           mascotify --version
           mascotify motions
           mascotify --help
+
+      # The web UI is served from package data, so it only proves out from an
+      # installed wheel — running it from the source tree hides a packaging bug.
+      - name: Smoke-test the web app from the installed wheel
+        run: |
+          uv tool install --force "dist/$(ls dist | grep whl)[web]"
+          mascotify serve --no-open --port 8799 &
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8799/api/config > /dev/null && break
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:8799/ | grep -q mascotify
+          curl -sf http://127.0.0.1:8799/app.css > /dev/null
+          curl -sf http://127.0.0.1:8799/api/config | grep -q has_anchor
+          echo "web app serves from the wheel"
