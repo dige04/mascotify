@@ -1,0 +1,20 @@
+.venv/
+__pycache__/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# Per-project job workspaces: generated art and exports, never source.
+.mascotify/
+
+# Spike artefacts. ref.png, sheet.png and sheet2.png are kept as the evidence
+# SPIKE.md cites; everything else is derived and reproducible from them.
+spike/*.log
+spike/*_cut*.png
+spike/knee_check.png
+spike/normalized_contact.png
+spike/preview.*
+spike/prompt.txt
+spike/identity_compare.png
+spike/reroll_prompt.txt

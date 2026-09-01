@@ -1,0 +1,76 @@
+name: ci
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python: ["3.10", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # The video tier shells out to ffmpeg. Its tests skip without it, so
+      # installing it here is what keeps that path actually covered.
+      - name: Install ffmpeg
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            brew install ffmpeg
+          else
+            sudo apt-get update && sudo apt-get install -y ffmpeg
+          fi
+
+      - name: Install
+        run: uv sync --python ${{ matrix.python }} --extra byok
+
+      - name: Test
+        run: uv run pytest tests/ -v
+
+      # The video tests skip themselves when ffmpeg is absent. A green run that
+      # skipped them looks identical to one that passed them, so fail loudly.
+      - name: Check the video tests were not silently skipped
+        run: |
+          uv run pytest tests/ -q -k "clip or extract_frames" | tee result.txt
+          if grep -q "skipped" result.txt; then
+            echo "::error::video-tier tests were skipped — ffmpeg is missing"
+            exit 1
+          fi
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Build
+        run: uv build
+
+      # SKILL.md is a data file, not a module. It has been silently dropped
+      # from a wheel before in projects laid out like this, and the failure
+      # only shows up when a user runs `mascotify install-skill`.
+      - name: Verify the skill ships in the wheel
+        run: |
+          python -c "
+          import glob, zipfile
+          names = zipfile.ZipFile(glob.glob('dist/*.whl')[0]).namelist()
+          assert any(n.endswith('assets/SKILL.md') for n in names), names
+          print('SKILL.md present in wheel')
+          "
+
+      - name: Install from the wheel and smoke-test the CLI
+        run: |
+          uv tool install --force dist/*.whl
+          mascotify --version
+          mascotify motions
+          mascotify --help

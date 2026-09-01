@@ -1,0 +1,45 @@
+[project]
+name = "mascotify"
+version = "0.1.0"
+description = "Turn one character image into production-ready animated mascot assets. Open source, BYOK, or driven entirely by your CLI coding agent."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Hieu Dinh" }]
+keywords = ["mascot", "sprite-sheet", "animation", "lottie", "gamedev", "mcp", "agent"]
+classifiers = [
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Topic :: Multimedia :: Graphics",
+]
+
+dependencies = [
+  "pillow>=10.2",
+  "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+# Local alpha matting. Heavy (onnxruntime), so it is opt-in: the chroma-key
+# path needs none of this and is the default for agent-generated art.
+matting = ["rembg>=2.0.56", "onnxruntime>=1.17"]
+# Direct provider access. Only needed when you are NOT delegating to your agent.
+byok = ["httpx>=0.27"]
+mcp = ["mcp>=1.2"]
+all = ["mascotify[matting,byok,mcp]"]
+
+[project.scripts]
+mascotify = "mascotify.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/hieudinh/mascotify"
+Issues = "https://github.com/hieudinh/mascotify/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mascotify"]
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
