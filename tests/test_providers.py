@@ -17,13 +17,15 @@ import io
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import ClassVar
 
 import pytest
 from PIL import Image
 
 pytest.importorskip("httpx")
 
-from mascotify.gen import images  # noqa: E402
+from mascotify import net
+from mascotify.gen import images
 
 
 def a_png() -> bytes:
@@ -39,7 +41,7 @@ B64 = base64.b64encode(PNG).decode()
 class Stub(BaseHTTPRequestHandler):
     """Answers each provider's documented success shape."""
 
-    seen: list[tuple[str, str, dict]] = []
+    seen: ClassVar[list[tuple[str, str, dict]]] = []
 
     def log_message(self, *_):  # keep pytest output clean
         pass
@@ -126,11 +128,11 @@ def stub(monkeypatch):
     # tick, which is half a second of pure teardown on every test in the file.
     threading.Thread(target=lambda: srv.serve_forever(poll_interval=0.01), daemon=True).start()
     base = f"http://127.0.0.1:{srv.server_address[1]}"
-    monkeypatch.setattr(
-        images, "BASE_URLS", {p: base for p in images.PROVIDERS}, raising=True
-    )
-    # Queue polling would otherwise add seconds per test for no coverage.
-    monkeypatch.setattr(images.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(images, "BASE_URLS", {p: base for p in images.PROVIDERS}, raising=True)
+    # Retries and queue polling both sleep. net resolves time.sleep at call
+    # time precisely so this patch lands; binding it as a default would freeze
+    # the real one at import and make every retry test wait for real.
+    monkeypatch.setattr(net.time, "sleep", lambda *_: None)
     yield base
     srv.shutdown()
 
@@ -218,3 +220,127 @@ def test_missing_key_points_at_the_keyless_path(monkeypatch):
         monkeypatch.delenv(env, raising=False)
     with pytest.raises(images.ProviderError, match="coding agent"):
         images.generate("fal", prompt="p")
+
+
+# ─── robustness ────────────────────────────────────────────────────────────
+# Generation is queued and billed before it succeeds, so a transient failure
+# mid-poll destroys work the caller has already paid for. These pin the
+# behaviour that makes that survivable.
+
+
+def test_a_transient_failure_is_retried_rather_than_losing_the_job(stub, monkeypatch):
+    calls = {"n": 0}
+    real = Stub.do_POST
+
+    def flaky(self):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            return self.send_error(502)
+        return real(self)
+
+    monkeypatch.setattr(Stub, "do_POST", flaky)
+    out = images.generate("openai", prompt="p", key="k", model="m")
+    assert out.png.startswith(b"\x89PNG")
+    assert calls["n"] == 3, "should have retried twice before succeeding"
+
+
+def test_a_request_error_is_not_retried(stub, monkeypatch):
+    """400 means the request is wrong; sending it again wastes the user's time."""
+    calls = {"n": 0}
+
+    def bad(self):
+        calls["n"] += 1
+        self.send_error(400)
+
+    monkeypatch.setattr(Stub, "do_POST", bad)
+    with pytest.raises(images.ProviderError):
+        images.generate("openai", prompt="p", key="k", model="m")
+    assert calls["n"] == 1, "a 400 must not be retried"
+
+
+def test_giving_up_still_names_the_provider(stub, monkeypatch):
+    monkeypatch.setattr(Stub, "do_POST", lambda self: self.send_error(503))
+    with pytest.raises(images.ProviderError, match="openai"):
+        images.generate("openai", prompt="p", key="k", model="m")
+
+
+def test_the_key_never_reaches_an_error_message(stub, monkeypatch):
+    """Providers echo request context in error bodies; a key in a traceback
+    outlives the session that produced it."""
+    secret = "sk-live-abcdef0123456789"
+
+    def echo(self):
+        blob = json.dumps({"error": f"bad request for key {secret}"}).encode()
+        self.send_response(400)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(blob)))
+        self.end_headers()
+        self.wfile.write(blob)
+
+    monkeypatch.setattr(Stub, "do_POST", echo)
+    with pytest.raises(images.ProviderError) as err:
+        images.generate("openai", prompt="p", key=secret, model="m")
+    assert secret not in str(err.value)
+    assert "***" in str(err.value)
+
+
+def test_a_non_json_poll_body_says_so(stub, monkeypatch):
+    """An HTML error page would otherwise surface as JSONDecodeError from deep
+    inside the adapter, which reads like a mascotify bug."""
+
+    def html(self):
+        blob = b"<html><body>502 Bad Gateway</body></html>"
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html")
+        self.send_header("Content-Length", str(len(blob)))
+        self.end_headers()
+        self.wfile.write(blob)
+
+    monkeypatch.setattr(Stub, "do_POST", html)
+    with pytest.raises(images.ProviderError, match="non-JSON"):
+        images.generate("openai", prompt="p", key="k", model="m")
+
+
+def test_a_result_url_serving_html_is_refused(stub, monkeypatch):
+    """Without the check an error page gets written out as a .png and the
+    failure surfaces much later as an unreadable image."""
+
+    original = Stub.do_GET  # captured before patching, or the fallback recurses
+
+    def not_an_image(self):
+        if self.path.startswith("/blob"):
+            blob = b"<html>gone</html>"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(blob)))
+            self.end_headers()
+            return self.wfile.write(blob)
+        return original(self)
+
+    monkeypatch.setattr(Stub, "do_GET", not_an_image)
+    with pytest.raises(images.ProviderError, match="rather than an image"):
+        images.generate("fal", prompt="p", key="k", model="m/1")
+
+
+def test_an_oversized_result_is_refused(stub, monkeypatch):
+    monkeypatch.setattr(net, "MAX_DOWNLOAD_BYTES", 16)
+    with pytest.raises(images.ProviderError, match="exceeded"):
+        images.generate("fal", prompt="p", key="k", model="m/1")
+
+
+def test_retry_after_is_honoured_over_backoff():
+    assert net.backoff_delay(0, retry_after="7") == 7.0
+    assert net.backoff_delay(0, retry_after="not-a-number") <= net.MAX_DELAY
+    assert 0 < net.backoff_delay(3) <= net.MAX_DELAY
+
+
+def test_redactor_ignores_values_too_short_to_be_secrets():
+    """Redacting a 3-character string would scrub unrelated words out of an
+    error and make it unreadable."""
+    r = net.Redactor.of("abc", "sk-longenoughsecret")
+    assert r("abc and sk-longenoughsecret") == "abc and ***"
+
+
+def test_every_request_identifies_the_client(stub):
+    images.generate("gemini", prompt="p", key="k", model="m")
+    assert net.USER_AGENT.startswith("mascotify/")

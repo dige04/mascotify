@@ -13,9 +13,11 @@ from __future__ import annotations
 
 import base64
 import os
-import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
+
+from .. import net
+from ..net import Redactor
 
 PROVIDERS = ("openai", "gemini", "fal", "replicate")
 
@@ -49,8 +51,12 @@ BASE_URLS = {
 }
 
 
-class ProviderError(RuntimeError):
-    pass
+# One class under two names rather than a translation layer. The web app catches
+# `images.ProviderError`, and anything raised from `net` has to be caught by
+# that same clause or an ordinary provider failure becomes a 500. Aliasing makes
+# that true by construction; a translate-on-the-way-out wrapper only stays true
+# until someone adds a code path that forgets to wrap.
+ProviderError = net.HttpError
 
 
 @dataclass
@@ -64,9 +70,7 @@ def _httpx():
     try:
         import httpx
     except ImportError as exc:
-        raise ProviderError(
-            "image providers need httpx: pip install 'mascotify[web]'"
-        ) from exc
+        raise ProviderError("image providers need httpx: pip install 'mascotify[web]'") from exc
     return httpx
 
 
@@ -106,7 +110,12 @@ def generate(
         "fal": _fal,
         "replicate": _replicate,
     }[provider]
-    png = fn(api_key, model, prompt, size, reference, timeout)
+    # Everything an adapter puts into an error passes through this first: a 400
+    # body can echo the request, and a key in a traceback outlives the session.
+    redact = Redactor.of(api_key)
+    png = fn(api_key, model, prompt, size, reference, timeout, redact)
+    if not png:
+        raise ProviderError(f"{provider} returned an empty image")
     return Generated(png=png, provider=provider, model=model)
 
 
@@ -117,49 +126,52 @@ def _data_uri(png: bytes, mime: str = "image/png") -> str:
 # --------------------------------------------------------------------- OpenAI
 
 
-def _openai(key, model, prompt, size, reference, timeout) -> bytes:
+def _openai(key, model, prompt, size, reference, timeout, redact) -> bytes:
     """`/v1/images/generations`, or `/v1/images/edits` when there is a reference.
 
-    Asks for a transparent background where the model supports it; the chroma
-    key still runs afterwards, and handles the case where it comes back opaque.
+    The request is built inside the retry callback rather than prepared once:
+    the edits call is multipart, and a multipart body is consumed on send, so a
+    resent request would arrive empty.
     """
     httpx = _httpx()
-    headers = {"Authorization": f"Bearer {key}"}
+    auth = net.headers({"Authorization": f"Bearer {key}"})
 
     with httpx.Client(timeout=timeout) as c:
-        if reference is None:
-            r = c.post(
-                f"{BASE_URLS['openai']}/images/generations",
-                headers={**headers, "Content-Type": "application/json"},
-                json={"model": model, "prompt": prompt, "size": size, "n": 1},
-            )
-        else:
-            r = c.post(
+
+        def call():
+            if reference is None:
+                return c.post(
+                    f"{BASE_URLS['openai']}/images/generations",
+                    headers={**auth, "Content-Type": "application/json"},
+                    json={"model": model, "prompt": prompt, "size": size, "n": 1},
+                )
+            return c.post(
                 f"{BASE_URLS['openai']}/images/edits",
-                headers=headers,
+                headers=auth,
                 data={"model": model, "prompt": prompt, "size": size, "n": "1"},
                 files={"image": ("reference.png", reference, "image/png")},
             )
-        _raise_for(r, "openai", model)
-        payload = r.json()
 
-    try:
-        item = payload["data"][0]
-    except (KeyError, IndexError) as exc:
-        raise ProviderError(f"openai returned no image: {payload}") from exc
+        resp = net.send(call, provider="openai", model=model, redact=redact)
+        payload = net.json_of(resp, "openai", redact)
 
-    if item.get("b64_json"):
-        return base64.b64decode(item["b64_json"])
-    if item.get("url"):
-        with httpx.Client(timeout=timeout, follow_redirects=True) as c:
-            return c.get(item["url"]).content
-    raise ProviderError(f"openai returned neither b64_json nor url: {item}")
+        try:
+            item = payload["data"][0]
+        except (KeyError, IndexError) as exc:
+            raise ProviderError(f"openai returned no image: {redact(str(payload))[:300]}") from exc
+
+        if item.get("b64_json"):
+            return base64.b64decode(item["b64_json"])
+        if item.get("url"):
+            return net.download(c, item["url"], provider="openai", redact=redact, timeout=timeout)
+
+    raise ProviderError("openai returned neither b64_json nor a url")
 
 
 # --------------------------------------------------------------------- Gemini
 
 
-def _gemini(key, model, prompt, size, reference, timeout) -> bytes:
+def _gemini(key, model, prompt, size, reference, timeout, redact) -> bytes:
     """`generateContent` with `responseModalities` including IMAGE.
 
     Size is not a parameter here — the model decides. That is fine: nothing
@@ -174,16 +186,20 @@ def _gemini(key, model, prompt, size, reference, timeout) -> bytes:
         )
 
     with httpx.Client(timeout=timeout) as c:
-        r = c.post(
-            f"{BASE_URLS['gemini']}/models/{model}:generateContent",
-            headers={"x-goog-api-key": key, "Content-Type": "application/json"},
-            json={
-                "contents": [{"role": "user", "parts": parts}],
-                "generationConfig": {"responseModalities": ["TEXT", "IMAGE"]},
-            },
+        resp = net.send(
+            lambda: c.post(
+                f"{BASE_URLS['gemini']}/models/{model}:generateContent",
+                headers=net.headers({"x-goog-api-key": key, "Content-Type": "application/json"}),
+                json={
+                    "contents": [{"role": "user", "parts": parts}],
+                    "generationConfig": {"responseModalities": ["TEXT", "IMAGE"]},
+                },
+            ),
+            provider="gemini",
+            model=model,
+            redact=redact,
         )
-        _raise_for(r, "gemini", model)
-        payload = r.json()
+        payload = net.json_of(resp, "gemini", redact)
 
     for cand in payload.get("candidates", []):
         for part in cand.get("content", {}).get("parts", []):
@@ -191,97 +207,129 @@ def _gemini(key, model, prompt, size, reference, timeout) -> bytes:
             if blob and blob.get("data"):
                 return base64.b64decode(blob["data"])
 
-    # A refusal comes back as text rather than an error status.
+    # A refusal comes back 200 with prose and no image, so it has to be read out
+    # of the body rather than off the status line.
     text = " ".join(
         p.get("text", "")
         for cand in payload.get("candidates", [])
         for p in cand.get("content", {}).get("parts", [])
     ).strip()
-    raise ProviderError(f"gemini returned no image{': ' + text if text else ''}")
+    raise ProviderError(f"gemini returned no image{': ' + redact(text)[:300] if text else ''}")
 
 
 # ------------------------------------------------------------------ fal.ai
 
 
-def _fal(key, model, prompt, size, reference, timeout, poll: float = 2.0) -> bytes:
+def _fal(key, model, prompt, size, reference, timeout, redact, poll: float = 2.0) -> bytes:
     """Queue submit then poll. One key reaches many models, which is why it is
-    the recommended provider for an open-source tool."""
+    the recommended provider for an open-source tool.
+
+    Every poll goes through `net.send`, so a 502 partway through a queued job
+    costs a retry rather than the whole generation — which the caller has
+    already been billed for by the time polling starts.
+    """
     httpx = _httpx()
-    headers = {"Authorization": f"Key {key}", "Content-Type": "application/json"}
+    hdr = net.headers({"Authorization": f"Key {key}", "Content-Type": "application/json"})
     payload: dict = {"prompt": prompt, "num_images": 1}
     if reference is not None:
         payload["image_urls"] = [_data_uri(reference)]
 
     with httpx.Client(timeout=timeout) as c:
-        r = c.post(f"{BASE_URLS['fal']}/{model}", headers=headers, json=payload)
-        _raise_for(r, "fal", model)
-        job = r.json()
+        job = net.json_of(
+            net.send(
+                lambda: c.post(f"{BASE_URLS['fal']}/{model}", headers=hdr, json=payload),
+                provider="fal",
+                model=model,
+                redact=redact,
+            ),
+            "fal",
+            redact,
+        )
         status_url, result_url = job.get("status_url"), job.get("response_url")
-        if not status_url:
-            raise ProviderError(f"fal returned no status_url: {job}")
+        if not status_url or not result_url:
+            raise ProviderError(f"fal returned no queue urls: {redact(str(job))[:300]}")
 
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            state = c.get(status_url, headers=headers).json()
-            if state.get("status") == "COMPLETED":
-                data = c.get(result_url, headers=headers).json()
-                images = data.get("images") or []
-                url = images[0].get("url") if images else None
-                if not url:
-                    raise ProviderError(f"fal completed with no image: {data}")
-                if url.startswith("data:"):
-                    return base64.b64decode(url.split(",", 1)[1])
-                return c.get(url, follow_redirects=True).content
-            if state.get("status") in {"FAILED", "ERROR"}:
-                raise ProviderError(f"fal generation failed: {state}")
-            time.sleep(poll)
-    raise ProviderError(f"fal did not finish within {timeout:.0f}s")
+        net.poll(
+            lambda: c.get(status_url, headers=hdr),
+            done=lambda s: s.get("status") == "COMPLETED",
+            failed=lambda s: str(s) if s.get("status") in {"FAILED", "ERROR"} else None,
+            provider="fal",
+            model=model,
+            redact=redact,
+            timeout=timeout,
+            interval=poll,
+        )
+
+        data = net.json_of(
+            net.send(
+                lambda: c.get(result_url, headers=hdr),
+                provider="fal",
+                model=model,
+                redact=redact,
+            ),
+            "fal",
+            redact,
+        )
+        images = data.get("images") or []
+        url = images[0].get("url") if images else None
+        if not url:
+            raise ProviderError(f"fal completed with no image: {redact(str(data))[:300]}")
+        if url.startswith("data:"):
+            return base64.b64decode(url.split(",", 1)[1])
+        return net.download(c, url, provider="fal", redact=redact, timeout=timeout)
 
 
 # --------------------------------------------------------------- Replicate
 
 
-def _replicate(key, model, prompt, size, reference, timeout, poll: float = 2.0) -> bytes:
+def _replicate(key, model, prompt, size, reference, timeout, redact, poll: float = 2.0) -> bytes:
     httpx = _httpx()
-    headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+    hdr = net.headers({"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
     inp: dict = {"prompt": prompt}
     if reference is not None:
         inp["image_input"] = [_data_uri(reference)]
 
     with httpx.Client(timeout=timeout) as c:
-        r = c.post(
-            f"{BASE_URLS['replicate']}/models/{model}/predictions",
-            headers=headers,
-            json={"input": inp},
+        pred = net.json_of(
+            net.send(
+                lambda: c.post(
+                    f"{BASE_URLS['replicate']}/models/{model}/predictions",
+                    headers=hdr,
+                    json={"input": inp},
+                ),
+                provider="replicate",
+                model=model,
+                redact=redact,
+            ),
+            "replicate",
+            redact,
         )
-        _raise_for(r, "replicate", model)
-        pred = r.json()
 
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            status = pred.get("status")
-            if status == "succeeded":
-                out = pred.get("output")
-                url = out[0] if isinstance(out, list) and out else out
-                if not isinstance(url, str):
-                    raise ProviderError(f"replicate returned no image url: {out}")
-                return c.get(url, follow_redirects=True).content
-            if status in {"failed", "canceled"}:
-                raise ProviderError(f"replicate {status}: {pred.get('error')}")
-            time.sleep(poll)
-            pred = c.get(pred["urls"]["get"], headers=headers).json()
-    raise ProviderError(f"replicate did not finish within {timeout:.0f}s")
+        # The submit response may already be terminal, so check before polling.
+        if pred.get("status") not in {"succeeded", "failed", "canceled"}:
+            follow = (pred.get("urls") or {}).get("get")
+            if not follow:
+                raise ProviderError(f"replicate returned no polling url: {redact(str(pred))[:300]}")
+            pred = net.poll(
+                lambda: c.get(follow, headers=hdr),
+                done=lambda s: s.get("status") == "succeeded",
+                failed=lambda s: (
+                    f"{s.get('status')}: {s.get('error')}"
+                    if s.get("status") in {"failed", "canceled"}
+                    else None
+                ),
+                provider="replicate",
+                model=model,
+                redact=redact,
+                timeout=timeout,
+                interval=poll,
+            )
 
+        if pred.get("status") in {"failed", "canceled"}:
+            raise ProviderError(f"replicate {pred.get('status')}: {redact(str(pred.get('error')))}")
 
-def _raise_for(r, provider: str, model: str) -> None:
-    if r.status_code == 401 or r.status_code == 403:
-        raise ProviderError(f"{provider} rejected the key ({r.status_code}). Check it and retry.")
-    if r.status_code == 404:
-        raise ProviderError(
-            f"{provider} does not recognise model {model!r}. Model catalogues move — "
-            f"pick a current id in settings."
-        )
-    if r.status_code == 429:
-        raise ProviderError(f"{provider} rate-limited the request. Wait and retry.")
-    if r.status_code >= 400:
-        raise ProviderError(f"{provider} error {r.status_code}: {r.text[:300]}")
+        out = pred.get("output")
+        url = out[0] if isinstance(out, list) and out else out
+        if not isinstance(url, str):
+            raise ProviderError(f"replicate returned no image url: {redact(str(out))[:300]}")
+        return net.download(c, url, provider="replicate", redact=redact, timeout=timeout)

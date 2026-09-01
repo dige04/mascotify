@@ -27,9 +27,10 @@ from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from mascotify.imaging import grid, normalize as nz  # noqa: E402
-from mascotify.imaging.cutout import alpha_bbox, chroma_key  # noqa: E402
-from mascotify.spec import CutoutSpec  # noqa: E402
+from mascotify.imaging import grid
+from mascotify.imaging import normalize as nz
+from mascotify.imaging.cutout import alpha_bbox, chroma_key
+from mascotify.spec import CutoutSpec
 
 HERE = Path(__file__).parent
 
@@ -114,7 +115,7 @@ def main() -> None:
     print(f"ref 1 frame, sheet1 {len(s1)} frames, sheet2 {len(s2)} frames\n")
 
     noise = report("within-sheet2 (baseline)", list(itertools.combinations(s2, 2)))
-    within1 = report("within-sheet1 (baseline)", list(itertools.combinations(s1, 2)))
+    report("within-sheet1 (baseline)", list(itertools.combinations(s1, 2)))
     drift2 = report("ref vs sheet2 (mild)", [(ref, f) for f in s2])
     drift1 = report("ref vs sheet1 (worse)", [(ref, f) for f in s1])
     cross = report("sheet1 vs sheet2", [(a, b) for a in s1[:6] for b in s2[:6]])
