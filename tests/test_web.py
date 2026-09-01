@@ -16,10 +16,10 @@ import pytest
 from PIL import Image, ImageDraw
 
 pytest.importorskip("fastapi")
-from fastapi.testclient import TestClient  # noqa: E402
+from fastapi.testclient import TestClient
 
-from mascotify.gen import images  # noqa: E402
-from mascotify.web.app import create_app  # noqa: E402
+from mascotify.gen import images
+from mascotify.web.app import create_app
 
 KEY = (3, 248, 8)
 
@@ -31,8 +31,9 @@ def sheet_png(rows=3, cols=4, cell=100, blob=44, clip=False) -> bytes:
     for r in range(rows):
         for c in range(cols):
             cx, cy = c * cell + cell // 2, r * cell + cell // 2
-            d.ellipse([cx - blob // 2, cy - blob // 2, cx + blob // 2, cy + blob // 2],
-                      fill=(200, 40, 60))
+            d.ellipse(
+                [cx - blob // 2, cy - blob // 2, cx + blob // 2, cy + blob // 2], fill=(200, 40, 60)
+            )
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()
@@ -40,7 +41,10 @@ def sheet_png(rows=3, cols=4, cell=100, blob=44, clip=False) -> bytes:
 
 @pytest.fixture
 def client(tmp_path):
-    return TestClient(create_app(tmp_path))
+    # TestClient sends Host: testserver by default, which the origin guard
+    # rejects — correctly. Point it at loopback so the suite exercises the same
+    # path a real browser takes rather than bypassing the guard.
+    return TestClient(create_app(tmp_path), base_url="http://127.0.0.1:8765")
 
 
 def test_config_reports_what_the_ui_needs(client):
@@ -86,6 +90,37 @@ def test_anchor_upload_rejects_a_non_image(client):
     assert r.status_code == 400
 
 
+def test_anchor_upload_rejects_an_oversized_body(client, monkeypatch):
+    monkeypatch.setattr("mascotify.web.app.MAX_UPLOAD_BYTES", 3)
+    r = client.post("/api/anchor/upload", files={"file": ("x.png", b"four", "image/png")})
+    assert r.status_code == 413
+
+
+def test_settings_reject_invalid_types_and_providers(client):
+    assert client.post("/api/settings", json={"provider": "unknown"}).status_code == 400
+    assert client.post("/api/settings", json={"model": 42}).status_code == 400
+
+
+def test_animate_rejects_non_numeric_geometry(client):
+    client.post(
+        "/api/anchor/upload",
+        files={"file": ("ref.png", sheet_png(rows=1, cols=1), "image/png")},
+    )
+    r = client.post("/api/animate", json={"rows": "many"})
+    assert r.status_code == 400
+
+
+def test_ingest_normalizes_a_free_form_action_to_a_safe_job(client, tmp_path):
+    r = client.post(
+        "/api/ingest?action=../../outside&rows=3&cols=4&fps=12",
+        files={"file": ("sheet.png", sheet_png(), "image/png")},
+    )
+    assert r.status_code == 200
+    assert r.json()["job"] == "outside"
+    assert (tmp_path / ".mascotify" / "outside" / "job.json").exists()
+    assert not (tmp_path.parent / "outside").exists()
+
+
 def test_ingest_exports_every_target(client):
     r = client.post(
         "/api/ingest?action=wave&rows=3&cols=4&fps=12",
@@ -95,9 +130,30 @@ def test_ingest_exports_every_target(client):
     assert body["ok"] is True, body
     assert body["frames"] >= 12
     assert {e["target"] for e in body["exports"]} == {
-        "web", "ios", "android", "unity", "godot", "lottie"
+        "web",
+        "ios",
+        "android",
+        "unity",
+        "godot",
+        "lottie",
     }
     assert all(e["snippet"] for e in body["exports"]), "each bundle ships usable code"
+
+
+def test_reingest_replaces_stale_export_files(client, tmp_path):
+    first = client.post(
+        "/api/ingest?action=wave&rows=3&cols=4&fps=12",
+        files={"file": ("sheet.png", sheet_png(), "image/png")},
+    ).json()
+    second = client.post(
+        "/api/ingest?action=wave&rows=1&cols=2&fps=12",
+        files={"file": ("sheet.png", sheet_png(rows=1, cols=2), "image/png")},
+    ).json()
+    assert first["ok"] is True and second["ok"] is True
+    imagesets = list(
+        (tmp_path / ".mascotify" / "wave" / "export" / "ios" / "Mascot.xcassets").glob("*.imageset")
+    )
+    assert len(imagesets) == second["frames"]
 
 
 def test_ingest_reports_problems_instead_of_erroring(client):
@@ -156,11 +212,21 @@ def test_job_survives_a_reload(client):
 
 
 def test_generation_without_a_key_explains_itself(client, monkeypatch):
+    """Only for the keyed providers — the default one deliberately needs none."""
     for env in images.ENV_KEYS.values():
-        monkeypatch.delenv(env, raising=False)
+        if env:
+            monkeypatch.delenv(env, raising=False)
+    client.post("/api/settings", json={"provider": "fal"})
     r = client.post("/api/anchor", json={"character": "a robot"})
     assert r.status_code == 400
     assert "key" in r.json()["detail"].lower()
+
+
+def test_the_default_provider_needs_no_key(client):
+    """A first run must not dead-end behind a settings dialog."""
+    c = client.get("/api/config").json()
+    assert c["provider"] not in c["needs_key"]
+    assert c["cost"][c["provider"]] == 0
 
 
 def test_animate_requires_an_anchor_first(client):
@@ -185,3 +251,43 @@ def test_index_and_assets_are_served(client):
     assert client.get("/").status_code == 200
     assert "text/css" in client.get("/app.css").headers["content-type"]
     assert client.get("/app.js").status_code == 200
+
+
+# ─── origin guard ──────────────────────────────────────────────────────────
+# The server holds an API key and can spend an agent quota, and it has no
+# authentication — the security model is that only this machine can reach it.
+
+
+def test_a_rebound_dns_host_is_refused(client):
+    """An attacker's domain resolving to 127.0.0.1 becomes same-origin, so CORS
+    stops applying. The browser still sends their name in Host, which is what
+    makes this catchable at all."""
+    r = client.get("/api/config", headers={"Host": "evil.example.com"})
+    assert r.status_code == 403
+    assert "refused" in r.json()["detail"]
+
+
+def test_a_cross_origin_upload_is_refused(client):
+    """multipart/form-data is CORS-safelisted, so this POST needs no preflight
+    and any page could otherwise overwrite the anchor."""
+    r = client.post(
+        "/api/anchor/upload",
+        headers={"Origin": "https://evil.example.com"},
+        files={"file": ("x.png", b"nope", "image/png")},
+    )
+    assert r.status_code == 403
+
+
+def test_the_browsers_own_requests_still_work(client):
+    assert client.get("/api/config").status_code == 200
+    r = client.post(
+        "/api/settings",
+        headers={"Origin": "http://127.0.0.1:8765"},
+        json={"provider": "agent"},
+    )
+    assert r.status_code == 200
+
+
+def test_reads_without_an_origin_header_are_allowed(client):
+    """curl and the browser's own navigation send no Origin."""
+    assert client.get("/api/config", headers={}).status_code == 200

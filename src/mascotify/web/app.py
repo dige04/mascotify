@@ -1,12 +1,14 @@
 """Local web app.
 
-Same pipeline as the CLI — this module only adds a provider (because a browser
-has no coding agent to draw with) and an HTTP surface. Nothing here re-implements
-keying, grid detection, normalisation or export; if it did, the web output and
-the CLI output would drift apart and neither would be reproducible.
+Same pipeline as the CLI — this module only adds an HTTP surface. Nothing here
+re-implements keying, grid detection, normalisation or export; if it did, the
+web output and the CLI output would drift apart and neither would be
+reproducible.
 
-Runs locally by default. Keys stay in this process's memory and are never
-written to disk or logged.
+The default provider is "agent", which drives the user's own coding agent and
+needs no key. Keyed providers are offered for speed, and a key pasted into
+settings stays in this process's memory — never written to disk, never returned
+to the browser.
 """
 
 from __future__ import annotations
@@ -30,13 +32,20 @@ from .. import __version__, pipeline
 from ..export.targets import TARGETS
 from ..gen import images, prompts
 from ..imaging import compare as cmp_mod
-from ..imaging.cutout import cut_out
 from ..imaging import grid as grid_mod
 from ..imaging import normalize as nz
+from ..imaging.cutout import cut_out
 from ..pipeline import Job
 from ..spec import MOTIONS, CutoutSpec, JobSpec, MotionSpec, SheetSpec
 
 STATIC = Path(__file__).parent / "static"
+# Only this machine's own browser may talk to the server. Binding elsewhere is
+# possible but has to be asked for, because there is no authentication here —
+# the security model is "it is on your loopback".
+LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "0.0.0.0"})
+
+MAX_UPLOAD_BYTES = 32 * 1024 * 1024
+MAX_IMAGE_PIXELS = 64_000_000
 
 
 @dataclass
@@ -45,19 +54,102 @@ class Session:
 
     root: Path
     keys: dict[str, str] = field(default_factory=dict)
-    provider: str = "fal"
+    provider: str = "agent"
     model: str = ""
 
     def key_for(self, provider: str) -> str | None:
         return self.keys.get(provider) or None
 
 
-def create_app(root: Path | None = None) -> FastAPI:
+def _hostname(value: str) -> str:
+    """Host or Origin header down to its bare hostname."""
+    value = value.strip()
+    if "//" in value:
+        value = value.split("//", 1)[1]
+    value = value.split("/", 1)[0]
+    if value.startswith("["):  # bracketed IPv6
+        return value[1 : value.index("]")] if "]" in value else value
+    return value.rsplit(":", 1)[0] if ":" in value else value
+
+
+def create_app(root: Path | None = None, *, allow_hosts: set[str] | None = None) -> FastAPI:
     app = FastAPI(title="mascotify", version=__version__)
     state = Session(root=(root or Path.cwd()).resolve())
+    allowed = allow_hosts if allow_hosts is not None else set(LOCAL_HOSTS)
+
+    @app.middleware("http")
+    async def guard_origin(request, call_next):
+        """Refuse requests that did not come from this machine's own browser tab.
+
+        Two attacks matter for a local server that holds an API key and can
+        spend money. DNS rebinding points an attacker's domain at 127.0.0.1 so
+        their page becomes same-origin and CORS stops applying — checking the
+        Host header is what stops it, because the browser still sends their
+        domain there. And `multipart/form-data` is CORS-safelisted, so any page
+        can POST an upload cross-origin with no preflight; checking Origin on
+        state-changing methods closes that.
+        """
+        if allowed:
+            host = _hostname(request.headers.get("host", ""))
+            if host and host not in allowed:
+                return JSONResponse(
+                    {
+                        "detail": (
+                            f"refused a request for host {host!r}. mascotify serve only "
+                            f"answers to {', '.join(sorted(allowed))}; this protects the "
+                            f"key and the agent quota it can spend."
+                        )
+                    },
+                    status_code=403,
+                )
+
+            origin = request.headers.get("origin")
+            if origin and request.method not in ("GET", "HEAD", "OPTIONS"):
+                if _hostname(origin) not in allowed:
+                    return JSONResponse(
+                        {"detail": f"refused a cross-origin request from {origin!r}"},
+                        status_code=403,
+                    )
+        return await call_next(request)
 
     def _job(name: str) -> Job:
-        return Job.open(state.root, name)
+        try:
+            return Job.open(state.root, name)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except FileNotFoundError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+    async def _read_image(file: UploadFile) -> bytes:
+        raw = await file.read(MAX_UPLOAD_BYTES + 1)
+        if len(raw) > MAX_UPLOAD_BYTES:
+            raise HTTPException(413, "image exceeds the 32 MiB upload limit")
+        try:
+            with Image.open(io.BytesIO(raw)) as image:
+                width, height = image.size
+                if width < 1 or height < 1 or width * height > MAX_IMAGE_PIXELS:
+                    raise HTTPException(413, "image exceeds the 64 megapixel limit")
+                image.verify()
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(400, "that file is not a readable image") from exc
+        return raw
+
+    def _text(body: dict, field: str, default: str = "") -> str:
+        value = body.get(field, default)
+        if not isinstance(value, str):
+            raise HTTPException(400, f"{field} must be a string")
+        return value.strip()
+
+    def _integer(body: dict, field: str, default: int) -> int:
+        value = body.get(field, default)
+        if isinstance(value, bool):
+            raise HTTPException(400, f"{field} must be an integer")
+        try:
+            return int(value)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(400, f"{field} must be an integer") from exc
 
     def _png(img: Image.Image) -> Response:
         buf = io.BytesIO()
@@ -79,11 +171,9 @@ def create_app(root: Path | None = None) -> FastAPI:
             "targets": list(TARGETS),
             # Which providers already have a key from the environment, so the
             # UI can say "ready" without ever sending the key to the browser.
-            "keyed": {
-                p: bool(state.key_for(p) or images.os.environ.get(images.ENV_KEYS[p]))
-                for p in images.PROVIDERS
-            },
+            "keyed": {p: bool(state.key_for(p)) or images.is_ready(p) for p in images.PROVIDERS},
             "cost": images.ROUGH_COST_USD,
+            "needs_key": sorted(images.NEEDS_KEY),
             # FastAPI's @app.get does not answer HEAD, so the UI cannot probe
             # for the anchor with one. Report it here instead of adding a route.
             "has_anchor": (state.root / pipeline.WORKSPACE / "ref.png").exists(),
@@ -91,13 +181,15 @@ def create_app(root: Path | None = None) -> FastAPI:
 
     @app.post("/api/settings")
     def settings(body: dict = Body(...)) -> dict:
-        if (p := body.get("provider")) in images.PROVIDERS:
-            state.provider = p
+        p = _text(body, "provider", state.provider)
+        if p not in images.PROVIDERS:
+            raise HTTPException(400, f"unknown provider {p!r}")
+        state.provider = p
         if "model" in body:
-            state.model = (body.get("model") or "").strip()
+            state.model = _text(body, "model")
         # A blank key means "leave whatever is already set" rather than "clear",
         # so re-saving other settings does not silently wipe it.
-        if (k := (body.get("key") or "").strip()) and (p := body.get("provider")):
+        if k := _text(body, "key"):
             state.keys[p] = k
         return config()
 
@@ -105,7 +197,7 @@ def create_app(root: Path | None = None) -> FastAPI:
 
     @app.post("/api/anchor")
     def anchor(body: dict = Body(...)) -> dict:
-        character = (body.get("character") or "").strip()
+        character = _text(body, "character")
         if not character:
             raise HTTPException(400, "describe the character first")
 
@@ -128,11 +220,7 @@ def create_app(root: Path | None = None) -> FastAPI:
 
     @app.post("/api/anchor/upload")
     async def anchor_upload(file: UploadFile) -> dict:
-        raw = await file.read()
-        try:
-            Image.open(io.BytesIO(raw)).verify()
-        except Exception as exc:
-            raise HTTPException(400, "that file is not a readable image") from exc
+        raw = await _read_image(file)
         d = state.root / pipeline.WORKSPACE
         d.mkdir(parents=True, exist_ok=True)
         (d / "ref.png").write_bytes(raw)
@@ -165,13 +253,13 @@ def create_app(root: Path | None = None) -> FastAPI:
         if not ref_path.exists():
             raise HTTPException(400, "make or upload an anchor first")
 
-        action = (body.get("action") or "wave").strip()
-        rows = int(body.get("rows") or 3)
-        cols = int(body.get("cols") or 4)
-        fps = int(body.get("fps") or 12)
+        action = _text(body, "action", "wave") or "wave"
+        rows = _integer(body, "rows", 3)
+        cols = _integer(body, "cols", 4)
+        fps = _integer(body, "fps", 12)
 
         spec = JobSpec(
-            motion=MotionSpec(action=action, description=body.get("describe") or ""),
+            motion=MotionSpec(action=action, description=_text(body, "describe")),
             sheet=SheetSpec(rows=rows, cols=cols, fps=fps),
         )
         try:
@@ -180,7 +268,7 @@ def create_app(root: Path | None = None) -> FastAPI:
             raise HTTPException(400, str(exc)) from exc
 
         spec.reference_sha = pipeline.sha(ref_path)
-        job = Job(root=state.root, spec=spec, name=action)
+        job = Job(root=state.root, spec=spec, name=pipeline.job_name(action))
         job.prepare()
 
         prompt = prompts.sheet_prompt(spec, from_reference=True)
@@ -239,11 +327,7 @@ def create_app(root: Path | None = None) -> FastAPI:
         coding agent draws the grid, this validates it and writes the bundles.
         Everything past this point is identical to the generated path.
         """
-        raw = await file.read()
-        try:
-            Image.open(io.BytesIO(raw)).verify()
-        except Exception as exc:
-            raise HTTPException(400, "that file is not a readable image") from exc
+        raw = await _read_image(file)
 
         spec = JobSpec(
             motion=MotionSpec(action=action),
@@ -254,7 +338,7 @@ def create_app(root: Path | None = None) -> FastAPI:
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
 
-        job = Job(root=state.root, spec=spec, name=action)
+        job = Job(root=state.root, spec=spec, name=pipeline.job_name(action))
         job.prepare()
         job.sheet_path.write_bytes(raw)
 
@@ -332,7 +416,11 @@ def create_app(root: Path | None = None) -> FastAPI:
         return Response(
             buf.getvalue(),
             media_type="application/zip",
-            headers={"Content-Disposition": f'attachment; filename="{job}-mascot.zip"'},
+            headers={
+                "Content-Disposition": (
+                    f'attachment; filename="{pipeline.asset_name(job)}-mascot.zip"'
+                )
+            },
         )
 
     @app.get("/api/jobs")
@@ -384,6 +472,10 @@ def create_app(root: Path | None = None) -> FastAPI:
 
     @app.delete("/api/jobs/{job}")
     def delete_job(job: str) -> dict:
+        try:
+            pipeline.validate_job_name(job)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
         d = (state.root / pipeline.WORKSPACE / job).resolve()
         base = (state.root / pipeline.WORKSPACE).resolve()
         # Never let a crafted name escape the workspace.

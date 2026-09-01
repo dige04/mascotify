@@ -14,7 +14,7 @@ The web app is the exception — a browser has no agent to draw with, so
 generated.
 
 ```bash
-uv tool install mascotify
+uv tool install git+https://github.com/dige04/mascotify.git
 mascotify install-skill          # teach your agent to drive it
 ```
 
@@ -25,21 +25,32 @@ Prefer a UI? `mascotify serve` runs a local web app on the same pipeline.
 ## The web app
 
 ```bash
-uv tool install 'mascotify[web]'
+uv tool install 'mascotify[web] @ git+https://github.com/dige04/mascotify.git'
 mascotify serve            # http://127.0.0.1:8765
 ```
 
 Describe a mascot, pick a motion, get an animated preview and every platform
-bundle as one download. It runs locally, and a key you paste into settings stays
-in that process's memory — never written to disk, never sent back to the browser.
+bundle as one download.
 
-The one thing it needs that the CLI does not is a provider key, because a
-browser has no coding agent to draw with. Pick from OpenAI, Gemini, fal or
-Replicate in settings.
+**It needs no key either.** The default provider is `agent`: mascotify shells
+out to the coding agent you already have signed in — Codex, or Gemini CLI — and
+uses its image tool. Nothing is charged and nothing is configured. If `codex` is
+on your PATH, the web app works on first run.
 
-There is a key-free route through it too: generate a sheet with your coding
-agent, then drop it into step 2. Validation, preview and export are identical —
-the browser only ever replaces the drawing step.
+The trade is latency: a turn through an agent takes a minute or two where an API
+call takes seconds. Paste an OpenAI, Gemini, fal or Replicate key into settings
+if you would rather pay to skip the wait; a key stays in that process's memory,
+never written to disk and never returned to the browser.
+
+A third route skips generation entirely — draw a sheet with your agent in a
+chat, then drop the file into step 2. Validation, preview and export are the
+same code either way; the browser only ever replaces the drawing step.
+
+It binds to loopback and refuses any request whose `Host` or `Origin` is not
+this machine. There is no authentication here, `multipart/form-data` is
+CORS-safelisted so a cross-origin upload needs no preflight, and DNS rebinding
+defeats CORS outright — without that check a page you happen to have open could
+spend your key. Do not expose it to a LAN or the internet.
 
 **Status of the provider adapters:** each one is tested against a stub serving
 its documented response shape, which proves mascotify builds the request and
@@ -194,11 +205,16 @@ Model catalogues move; if a default id is rejected, pass `--model`.
 ## Install
 
 ```bash
-uv tool install mascotify                 # core: sprite path, all exports
-uv tool install 'mascotify[byok]'         # + the video tier
-uv tool install 'mascotify[matting]'      # + local background removal (rembg)
-uv tool install 'mascotify[mcp]'          # + the MCP server
+git clone https://github.com/dige04/mascotify.git
+cd mascotify
+uv tool install .                          # core: sprite path, all exports
+uv tool install '.[byok]'                  # + the video tier
+uv tool install '.[matting]'               # + local background removal (rembg)
+uv tool install '.[mcp]'                   # + the MCP server
 ```
+
+These source installs are intentional until the first PyPI release is published;
+the package name is not presented as available from PyPI before that happens.
 
 Only Pillow and numpy in the core. `matting` pulls in onnxruntime and is worth
 it only for art that was not generated onto a flat backdrop.
@@ -219,6 +235,20 @@ mascotify is MIT. **What you generate with it is not covered by that.** The
 commercial terms for generated art come from whichever model produced it — your
 agent's provider, or fal/Replicate on the video path. Check those terms before
 shipping a mascot as a brand asset.
+
+## Development
+
+```bash
+uv sync --frozen --extra byok --extra web
+uv run ruff check .
+uv run ruff format --check .
+uv run pytest tests/ -q
+uv build
+```
+
+CI runs lint and formatting plus the full suite on Python 3.10 and 3.13 across
+Linux and macOS. It also installs the built wheel and smoke-tests the CLI and
+packaged web assets, so source-tree-only successes do not hide release defects.
 
 ## Prior art
 

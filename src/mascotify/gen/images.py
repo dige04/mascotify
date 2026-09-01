@@ -19,9 +19,20 @@ from dataclasses import dataclass
 from .. import net
 from ..net import Redactor
 
-PROVIDERS = ("openai", "gemini", "fal", "replicate")
+# "agent" first: it needs no key, which makes it the only provider a new user
+# can actually run. The rest are there for speed and for CI-style automation
+# where no agent CLI is signed in.
+PROVIDERS = ("agent", "openai", "gemini", "fal", "replicate")
+
+# Providers that require an API key. "agent" does not — it drives a coding
+# agent's own image tool, which is the premise the CLI and the skill are built
+# on and the reason the web app no longer demands a key to be useful.
+NEEDS_KEY = frozenset({"openai", "gemini", "fal", "replicate"})
 
 ENV_KEYS = {
+    # Present but empty so callers iterating PROVIDERS do not KeyError; use
+    # NEEDS_KEY to decide whether a key is actually required.
+    "agent": "",
     "openai": "OPENAI_API_KEY",
     "gemini": "GEMINI_API_KEY",
     "fal": "FAL_KEY",
@@ -31,6 +42,10 @@ ENV_KEYS = {
 # Catalogues move faster than any pinned default, so every one of these is
 # overridable and a rejected id produces an error that says so.
 DEFAULT_MODELS = {
+    # For the agent provider the "model" names which CLI to drive. "auto" picks
+    # the best one installed — pinning a name here would tell someone who only
+    # has gemini that codex is missing, rather than just using what they have.
+    "agent": "auto",
     "openai": "gpt-image-1.5",
     "gemini": "gemini-3.1-flash-image",
     "fal": "fal-ai/nano-banana/edit",
@@ -38,7 +53,7 @@ DEFAULT_MODELS = {
 }
 
 # Shown before spending, per image. Deliberately rough.
-ROUGH_COST_USD = {"openai": 0.04, "gemini": 0.04, "fal": 0.04, "replicate": 0.04}
+ROUGH_COST_USD = {"agent": 0.0, "openai": 0.04, "gemini": 0.04, "fal": 0.04, "replicate": 0.04}
 
 # Split out so a proxy or self-hosted gateway can be pointed at, and so the
 # adapters can be exercised against a stub. Response parsing is where adapter
@@ -74,7 +89,22 @@ def _httpx():
     return httpx
 
 
+def is_ready(provider: str) -> bool:
+    """Whether this provider could run right now.
+
+    A keyed provider needs a key from settings or the environment; the agent
+    provider needs a signed-in CLI on PATH instead.
+    """
+    if provider not in NEEDS_KEY:
+        from . import agent as agent_mod
+
+        return bool(agent_mod.available())
+    return bool(os.environ.get(ENV_KEYS.get(provider, "")))
+
+
 def resolve_key(provider: str, key: str | None = None) -> str:
+    if provider not in NEEDS_KEY:
+        return ""  # the agent route authenticates itself
     if key:
         return key
     env = ENV_KEYS.get(provider)
@@ -105,6 +135,7 @@ def generate(
     model = model or DEFAULT_MODELS[provider]
 
     fn: Callable[..., bytes] = {
+        "agent": _agent,
         "openai": _openai,
         "gemini": _gemini,
         "fal": _fal,
@@ -119,6 +150,22 @@ def generate(
     return Generated(png=png, provider=provider, model=model)
 
 
+# ---------------------------------------------------------------------- agent
+
+
+def _agent(key, model, prompt, size, reference, timeout, redact) -> bytes:
+    """Delegate to a coding agent's own image tool. No key, no per-image cost."""
+    from . import agent as agent_mod
+
+    return agent_mod.generate(
+        prompt,
+        reference=reference,
+        size=size,
+        cli="" if model in ("", "auto", None) else model,
+        timeout=max(timeout, agent_mod.DEFAULT_TIMEOUT),
+    )
+
+
 def _data_uri(png: bytes, mime: str = "image/png") -> str:
     return f"data:{mime};base64," + base64.b64encode(png).decode()
 
@@ -129,9 +176,8 @@ def _data_uri(png: bytes, mime: str = "image/png") -> str:
 def _openai(key, model, prompt, size, reference, timeout, redact) -> bytes:
     """`/v1/images/generations`, or `/v1/images/edits` when there is a reference.
 
-    The request is built inside the retry callback rather than prepared once:
-    the edits call is multipart, and a multipart body is consumed on send, so a
-    resent request would arrive empty.
+    The billable POST is sent once. Without a provider idempotency key, retrying
+    an ambiguous failure could create and charge for two generations.
     """
     httpx = _httpx()
     auth = net.headers({"Authorization": f"Bearer {key}"})
@@ -152,7 +198,7 @@ def _openai(key, model, prompt, size, reference, timeout, redact) -> bytes:
                 files={"image": ("reference.png", reference, "image/png")},
             )
 
-        resp = net.send(call, provider="openai", model=model, redact=redact)
+        resp = net.submit(call, provider="openai", model=model, redact=redact)
         payload = net.json_of(resp, "openai", redact)
 
         try:
@@ -186,7 +232,7 @@ def _gemini(key, model, prompt, size, reference, timeout, redact) -> bytes:
         )
 
     with httpx.Client(timeout=timeout) as c:
-        resp = net.send(
+        resp = net.submit(
             lambda: c.post(
                 f"{BASE_URLS['gemini']}/models/{model}:generateContent",
                 headers=net.headers({"x-goog-api-key": key, "Content-Type": "application/json"}),
@@ -236,7 +282,7 @@ def _fal(key, model, prompt, size, reference, timeout, redact, poll: float = 2.0
 
     with httpx.Client(timeout=timeout) as c:
         job = net.json_of(
-            net.send(
+            net.submit(
                 lambda: c.post(f"{BASE_URLS['fal']}/{model}", headers=hdr, json=payload),
                 provider="fal",
                 model=model,
@@ -291,7 +337,7 @@ def _replicate(key, model, prompt, size, reference, timeout, redact, poll: float
 
     with httpx.Client(timeout=timeout) as c:
         pred = net.json_of(
-            net.send(
+            net.submit(
                 lambda: c.post(
                     f"{BASE_URLS['replicate']}/models/{model}/predictions",
                     headers=hdr,

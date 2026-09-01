@@ -65,10 +65,15 @@ async function loadConfig() {
   $("set-model").value = c.model;
   $("set-model").placeholder = c.default_models[c.provider] || "";
 
-  const cost = c.cost[c.provider];
-  $("cost-hint").textContent = c.keyed[c.provider]
-    ? `Each generation calls ${c.provider} on your key — roughly $${cost.toFixed(2)} an image.`
-    : `Add a ${c.provider} key in settings before generating.`;
+  const needsKey = (c.needs_key || []).includes(c.provider);
+  const cost = c.cost[c.provider] ?? 0;
+  $("cost-hint").textContent = !needsKey
+    ? c.keyed[c.provider]
+      ? "Drawn by your coding agent — no API key, nothing charged. Slower than a provider: a grid can take a couple of minutes."
+      : "No coding agent found on PATH. Install and sign in to codex, or pick a provider with a key in settings."
+    : c.keyed[c.provider]
+      ? `Each generation calls ${c.provider} on your key — roughly $${cost.toFixed(2)} an image.`
+      : `Add a ${c.provider} key in settings before generating.`;
 
   $("motions").innerHTML = Object.entries(c.motions)
     .map(

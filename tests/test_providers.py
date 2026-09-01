@@ -27,6 +27,11 @@ pytest.importorskip("httpx")
 from mascotify import net
 from mascotify.gen import images
 
+# The HTTP adapters only. The "agent" provider drives a coding agent CLI as a
+# subprocess rather than making requests, so the stub server says nothing about
+# it — tests/test_agent_provider.py covers that route instead.
+HTTP_PROVIDERS = tuple(p for p in images.PROVIDERS if p in images.NEEDS_KEY)
+
 
 def a_png() -> bytes:
     buf = io.BytesIO()
@@ -137,7 +142,7 @@ def stub(monkeypatch):
     srv.shutdown()
 
 
-@pytest.mark.parametrize("provider", images.PROVIDERS)
+@pytest.mark.parametrize("provider", HTTP_PROVIDERS)
 def test_every_adapter_extracts_a_png(stub, provider):
     out = images.generate(provider, prompt="a robot", key="test-key", model="m/1")
     assert out.png.startswith(b"\x89PNG"), f"{provider} did not return decodable PNG bytes"
@@ -146,7 +151,7 @@ def test_every_adapter_extracts_a_png(stub, provider):
     assert out.model == "m/1"
 
 
-@pytest.mark.parametrize("provider", images.PROVIDERS)
+@pytest.mark.parametrize("provider", HTTP_PROVIDERS)
 def test_every_adapter_accepts_a_reference(stub, provider):
     out = images.generate(
         provider, prompt="a grid", key="k", model="m/1", reference=PNG, size="2048x1536"
@@ -228,20 +233,35 @@ def test_missing_key_points_at_the_keyless_path(monkeypatch):
 # behaviour that makes that survivable.
 
 
-def test_a_transient_failure_is_retried_rather_than_losing_the_job(stub, monkeypatch):
+def test_a_transient_poll_failure_is_retried_rather_than_losing_the_job(stub, monkeypatch):
     calls = {"n": 0}
-    real = Stub.do_POST
+    real = Stub.do_GET
 
     def flaky(self):
-        calls["n"] += 1
-        if calls["n"] < 3:
-            return self.send_error(502)
+        if self.path.startswith("/fal-status"):
+            calls["n"] += 1
+            if calls["n"] < 3:
+                return self.send_error(502)
         return real(self)
 
-    monkeypatch.setattr(Stub, "do_POST", flaky)
-    out = images.generate("openai", prompt="p", key="k", model="m")
+    monkeypatch.setattr(Stub, "do_GET", flaky)
+    out = images.generate("fal", prompt="p", key="k", model="m")
     assert out.png.startswith(b"\x89PNG")
     assert calls["n"] == 3, "should have retried twice before succeeding"
+
+
+@pytest.mark.parametrize("provider", HTTP_PROVIDERS)
+def test_a_transient_submit_error_is_not_retried_and_double_charged(stub, monkeypatch, provider):
+    calls = {"n": 0}
+
+    def ambiguous(self):
+        calls["n"] += 1
+        self.send_error(502)
+
+    monkeypatch.setattr(Stub, "do_POST", ambiguous)
+    with pytest.raises(images.ProviderError):
+        images.generate(provider, prompt="p", key="k", model="m")
+    assert calls["n"] == 1
 
 
 def test_a_request_error_is_not_retried(stub, monkeypatch):
@@ -320,6 +340,24 @@ def test_a_result_url_serving_html_is_refused(stub, monkeypatch):
     monkeypatch.setattr(Stub, "do_GET", not_an_image)
     with pytest.raises(images.ProviderError, match="rather than image/"):
         images.generate("fal", prompt="p", key="k", model="m/1")
+
+
+@pytest.mark.parametrize("path_fragment", ["/fal-result", "/blob"])
+def test_a_transient_result_read_is_retried(stub, monkeypatch, path_fragment):
+    calls = {"n": 0}
+    original = Stub.do_GET
+
+    def flaky(self):
+        if self.path.startswith(path_fragment):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return self.send_error(502)
+        return original(self)
+
+    monkeypatch.setattr(Stub, "do_GET", flaky)
+    out = images.generate("fal", prompt="p", key="k", model="m/1")
+    assert out.png.startswith(b"\x89PNG")
+    assert calls["n"] == 2
 
 
 def test_an_oversized_result_is_refused(stub, monkeypatch):
