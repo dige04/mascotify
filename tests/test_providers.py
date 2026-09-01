@@ -318,7 +318,7 @@ def test_a_result_url_serving_html_is_refused(stub, monkeypatch):
         return original(self)
 
     monkeypatch.setattr(Stub, "do_GET", not_an_image)
-    with pytest.raises(images.ProviderError, match="rather than an image"):
+    with pytest.raises(images.ProviderError, match="rather than image/"):
         images.generate("fal", prompt="p", key="k", model="m/1")
 
 

@@ -16,6 +16,7 @@ import random
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from . import __version__
@@ -30,9 +31,15 @@ RETRY_STATUS = frozenset({408, 425, 429, 500, 502, 503, 504})
 MAX_ATTEMPTS = 4
 BASE_DELAY = 1.0
 MAX_DELAY = 20.0
-# A generated image is a few MB. Anything past this is an error page, a
-# redirect loop, or a provider having a very bad day.
+# A generated image is a few MB and a 5s clip is tens. Anything past this is an
+# error page, a redirect loop, or a provider having a very bad day.
 MAX_DOWNLOAD_BYTES = 64 * 1024 * 1024
+
+# What a result URL is allowed to serve. Checking this is what stops an error
+# page being written out as a .png or .mp4 and failing much later as an
+# unreadable file. Some CDNs serve generated assets as octet-stream.
+IMAGE_TYPES = ("image/", "application/octet-stream")
+VIDEO_TYPES = ("video/", "application/octet-stream")
 
 
 class HttpError(RuntimeError):
@@ -198,12 +205,77 @@ def download(
     redact: Redactor,
     timeout: float,
     max_bytes: int | None = None,
+    accept: tuple[str, ...] = IMAGE_TYPES,
 ) -> bytes:
-    """Fetch a result asset, refusing anything that is not one.
+    """Fetch a result asset into memory, refusing anything that is not one.
 
     Without the status check an error page gets written out as a `.png`, and
     the failure surfaces much later as an unreadable image.
     """
+    chunks: list[bytes] = []
+    _stream(
+        client,
+        url,
+        provider=provider,
+        redact=redact,
+        timeout=timeout,
+        max_bytes=max_bytes,
+        accept=accept,
+        write=chunks.append,
+    )
+    return b"".join(chunks)
+
+
+def download_to(
+    client: Any,
+    url: str,
+    dest: Path,
+    *,
+    provider: str,
+    redact: Redactor,
+    timeout: float,
+    max_bytes: int | None = None,
+    accept: tuple[str, ...] = VIDEO_TYPES,
+) -> Path:
+    """Stream a result asset to disk under the same guards.
+
+    A video clip is large enough that buffering it whole to hand back as bytes
+    is a needless spike in memory, and the caller wants a file either way.
+    """
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_suffix(dest.suffix + ".part")
+    try:
+        with tmp.open("wb") as fh:
+            _stream(
+                client,
+                url,
+                provider=provider,
+                redact=redact,
+                timeout=timeout,
+                max_bytes=max_bytes,
+                accept=accept,
+                write=fh.write,
+            )
+        # Rename only once the whole body arrived, so a truncated download can
+        # never be mistaken for a finished clip on a later run.
+        tmp.replace(dest)
+    finally:
+        tmp.unlink(missing_ok=True)
+    return dest
+
+
+def _stream(
+    client: Any,
+    url: str,
+    *,
+    provider: str,
+    redact: Redactor,
+    timeout: float,
+    max_bytes: int | None,
+    accept: tuple[str, ...],
+    write: Any,
+) -> int:
+    """Shared guards for both download shapes."""
     # Read the cap at call time. As a default argument it would freeze at import
     # and quietly ignore any later override — the same binding trap that made
     # patching `sleep` a no-op.
@@ -214,21 +286,23 @@ def download(
             raise HttpError(f"{provider} result URL returned {r.status_code}")
 
         ctype = (r.headers.get("Content-Type") or "").split(";")[0].strip()
-        if ctype and not (ctype.startswith("image/") or ctype == "application/octet-stream"):
-            raise HttpError(f"{provider} result URL served {ctype!r} rather than an image")
+        if ctype and not any(ctype.startswith(a) for a in accept):
+            raise HttpError(
+                f"{provider} result URL served {ctype!r} rather than {' or '.join(accept)}"
+            )
 
-        chunks, total = [], 0
+        total = 0
         for chunk in r.iter_bytes():
             total += len(chunk)
             if total > max_bytes:
                 raise HttpError(
                     f"{provider} result exceeded {max_bytes // 1024 // 1024}MB; refusing it"
                 )
-            chunks.append(chunk)
+            write(chunk)
 
     if not total:
         raise HttpError(f"{provider} result URL returned an empty body")
-    return b"".join(chunks)
+    return total
 
 
 def headers(extra: dict[str, str] | None = None) -> dict[str, str]:

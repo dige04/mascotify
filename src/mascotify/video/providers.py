@@ -2,23 +2,34 @@
 
 This is the one tier that cannot be delegated to a coding agent: Codex's
 `image_gen` and Gemini CLI make images, not video. So unlike every other path in
-mascotify, this one needs a key.
+mascotify, this one needs a key — and it is the only path that charges real
+money per call, roughly $0.25 a clip.
 
-Aggregators are the deliberate choice over direct vendor SDKs — one key reaches
-many models, and swapping models is a flag rather than a new integration. That
-matters more for an open-source tool than shaving a hop.
+That makes robustness worth more here than anywhere else. A clip is billed the
+moment it is queued, so a transient 502 partway through a two-minute poll used
+to throw away something the caller had already paid for. Everything shared with
+the image adapters — retries, status-checked polling, redaction, bounded
+downloads — lives in `mascotify.net` rather than being written twice and
+drifting.
+
+Aggregators are the deliberate choice over direct vendor SDKs: one key reaches
+many models, and swapping models is a flag rather than a new integration.
 """
 
 from __future__ import annotations
 
+import base64
+import mimetypes
 import os
-import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from .. import net
+from ..net import Redactor
+
 # Model catalogues move faster than any pinned default. These are starting
-# points, not guarantees: pass --model to override, and `mascotify video` will
-# say so plainly if the provider rejects the id.
+# points, not guarantees: pass --model to override, and the error names the
+# cause when a provider rejects the id.
 DEFAULT_MODELS = {
     "fal": "fal-ai/kling-video/v1.6/standard/image-to-video",
     "replicate": "kwaivgi/kling-v1.6-standard",
@@ -29,9 +40,17 @@ ENV_KEYS = {"fal": "FAL_KEY", "replicate": "REPLICATE_API_TOKEN"}
 # Rough per-clip prices, only ever shown as an estimate before spending.
 ROUGH_COST_USD = {"fal": 0.25, "replicate": 0.25}
 
+# Overridable so a proxy or gateway can be pointed at, and so the adapters can
+# be exercised against a stub without a key.
+BASE_URLS = {
+    "fal": "https://queue.fal.run",
+    "replicate": "https://api.replicate.com/v1",
+}
 
-class ProviderError(RuntimeError):
-    pass
+# The same class under a local name, so `except providers.ProviderError` and
+# anything raised inside `net` are one thing rather than two that have to be
+# kept in sync. It stays a RuntimeError, which is what the CLI catches.
+ProviderError = net.HttpError
 
 
 @dataclass
@@ -41,22 +60,20 @@ class Clip:
     provider: str
 
 
-def _client():
+def _httpx():
     try:
-        import httpx  # noqa: F401
+        import httpx
     except ImportError as exc:
-        raise ProviderError(
-            "the video path needs httpx: pip install 'mascotify[byok]'"
-        ) from exc
-    import httpx
-
+        raise ProviderError("the video path needs httpx: pip install 'mascotify[byok]'") from exc
     return httpx
 
 
-def require_key(provider: str) -> str:
+def require_key(provider: str, key: str | None = None) -> str:
+    if key:
+        return key
     env = ENV_KEYS[provider]
-    key = os.environ.get(env)
-    if not key:
+    found = os.environ.get(env)
+    if not found:
         raise ProviderError(
             f"{provider} needs {env} in the environment.\n"
             f"The video tier is the only part of mascotify that needs a key — "
@@ -64,7 +81,7 @@ def require_key(provider: str) -> str:
             f"For a longer no-key animation instead, try a bigger grid:\n"
             f"  mascotify plan --rows 4 --cols 6 --fps 24 --action <motion>"
         )
-    return key
+    return found
 
 
 def generate(
@@ -75,106 +92,129 @@ def generate(
     duration: int,
     model: str | None,
     out: Path,
+    key: str | None = None,
     timeout: float = 600.0,
     poll: float = 3.0,
 ) -> Clip:
-    key = require_key(provider)
+    """Queue a clip, wait for it, and stream the result to `out`."""
+    if provider not in DEFAULT_MODELS:
+        raise ProviderError(f"unknown provider {provider!r}; known: {', '.join(DEFAULT_MODELS)}")
+    api_key = require_key(provider, key)
     model = model or DEFAULT_MODELS[provider]
-    httpx = _client()
+    redact = Redactor.of(api_key)
+    httpx = _httpx()
 
-    if provider == "fal":
-        clip_url = _fal(httpx, key, model, image, prompt, duration, timeout, poll)
-    elif provider == "replicate":
-        clip_url = _replicate(httpx, key, model, image, prompt, duration, timeout, poll)
-    else:
-        raise ProviderError(f"unknown provider {provider!r}")
+    with httpx.Client(timeout=timeout) as c:
+        fetch = _fal if provider == "fal" else _replicate
+        url = fetch(c, api_key, model, image, prompt, duration, timeout, poll, redact)
+        net.download_to(
+            c,
+            url,
+            out,
+            provider=provider,
+            redact=redact,
+            timeout=timeout,
+            accept=net.VIDEO_TYPES,
+        )
 
-    out.parent.mkdir(parents=True, exist_ok=True)
-    with httpx.stream("GET", clip_url, timeout=timeout, follow_redirects=True) as r:
-        r.raise_for_status()
-        with out.open("wb") as fh:
-            for chunk in r.iter_bytes():
-                fh.write(chunk)
     return Clip(path=out, model=model, provider=provider)
 
 
 def _data_uri(image: Path) -> str:
-    import base64
-    import mimetypes
-
     mime = mimetypes.guess_type(image.name)[0] or "image/png"
     return f"data:{mime};base64," + base64.b64encode(image.read_bytes()).decode()
 
 
-def _fal(httpx, key, model, image, prompt, duration, timeout, poll) -> str:
-    headers = {"Authorization": f"Key {key}", "Content-Type": "application/json"}
+def _fal(c, key, model, image, prompt, duration, timeout, poll, redact) -> str:
+    hdr = net.headers({"Authorization": f"Key {key}", "Content-Type": "application/json"})
     payload = {"image_url": _data_uri(image), "prompt": prompt, "duration": str(duration)}
 
-    with httpx.Client(timeout=timeout) as c:
-        r = c.post(f"https://queue.fal.run/{model}", headers=headers, json=payload)
-        if r.status_code == 404:
-            raise ProviderError(
-                f"fal rejected model {model!r}. Check the current id at fal.ai/models "
-                f"and pass it with --model."
-            )
-        r.raise_for_status()
-        job = r.json()
-        status_url, result_url = job.get("status_url"), job.get("response_url")
-        if not status_url:
-            raise ProviderError(f"fal returned no status_url: {job}")
+    job = net.json_of(
+        net.send(
+            lambda: c.post(f"{BASE_URLS['fal']}/{model}", headers=hdr, json=payload),
+            provider="fal",
+            model=model,
+            redact=redact,
+        ),
+        "fal",
+        redact,
+    )
+    status_url, result_url = job.get("status_url"), job.get("response_url")
+    if not status_url or not result_url:
+        raise ProviderError(f"fal returned no queue urls: {redact(str(job))[:300]}")
 
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            s = c.get(status_url, headers=headers).json()
-            state = s.get("status")
-            if state == "COMPLETED":
-                data = c.get(result_url, headers=headers).json()
-                video = data.get("video") or {}
-                url = video.get("url") if isinstance(video, dict) else None
-                if not url:
-                    raise ProviderError(f"fal completed but returned no video url: {data}")
-                return url
-            if state in {"FAILED", "ERROR"}:
-                raise ProviderError(f"fal generation failed: {s}")
-            time.sleep(poll)
-    raise ProviderError(f"fal did not finish within {timeout:.0f}s")
+    net.poll(
+        lambda: c.get(status_url, headers=hdr),
+        done=lambda s: s.get("status") == "COMPLETED",
+        failed=lambda s: str(s) if s.get("status") in {"FAILED", "ERROR"} else None,
+        provider="fal",
+        model=model,
+        redact=redact,
+        timeout=timeout,
+        interval=poll,
+    )
+
+    data = net.json_of(
+        net.send(
+            lambda: c.get(result_url, headers=hdr),
+            provider="fal",
+            model=model,
+            redact=redact,
+        ),
+        "fal",
+        redact,
+    )
+    video = data.get("video") or {}
+    url = video.get("url") if isinstance(video, dict) else None
+    if not url:
+        raise ProviderError(f"fal completed with no video url: {redact(str(data))[:300]}")
+    return url
 
 
-def _replicate(httpx, key, model, image, prompt, duration, timeout, poll) -> str:
-    headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
-    payload = {
-        "input": {
-            "start_image": _data_uri(image),
-            "prompt": prompt,
-            "duration": duration,
-        }
-    }
+def _replicate(c, key, model, image, prompt, duration, timeout, poll, redact) -> str:
+    hdr = net.headers({"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
+    payload = {"input": {"start_image": _data_uri(image), "prompt": prompt, "duration": duration}}
 
-    with httpx.Client(timeout=timeout) as c:
-        r = c.post(
-            f"https://api.replicate.com/v1/models/{model}/predictions",
-            headers=headers,
-            json=payload,
+    pred = net.json_of(
+        net.send(
+            lambda: c.post(
+                f"{BASE_URLS['replicate']}/models/{model}/predictions",
+                headers=hdr,
+                json=payload,
+            ),
+            provider="replicate",
+            model=model,
+            redact=redact,
+        ),
+        "replicate",
+        redact,
+    )
+
+    # The submit response can already be terminal, so check before polling.
+    if pred.get("status") not in {"succeeded", "failed", "canceled"}:
+        follow = (pred.get("urls") or {}).get("get")
+        if not follow:
+            raise ProviderError(f"replicate returned no polling url: {redact(str(pred))[:300]}")
+        pred = net.poll(
+            lambda: c.get(follow, headers=hdr),
+            done=lambda s: s.get("status") == "succeeded",
+            failed=lambda s: (
+                f"{s.get('status')}: {s.get('error')}"
+                if s.get("status") in {"failed", "canceled"}
+                else None
+            ),
+            provider="replicate",
+            model=model,
+            redact=redact,
+            timeout=timeout,
+            interval=poll,
         )
-        if r.status_code == 404:
-            raise ProviderError(
-                f"replicate rejected model {model!r}. Check the current id at "
-                f"replicate.com/explore and pass it with --model."
-            )
-        r.raise_for_status()
-        pred = r.json()
 
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            status = pred.get("status")
-            if status == "succeeded":
-                out = pred.get("output")
-                url = out[0] if isinstance(out, list) and out else out
-                if not isinstance(url, str):
-                    raise ProviderError(f"replicate returned no video url: {out}")
-                return url
-            if status in {"failed", "canceled"}:
-                raise ProviderError(f"replicate generation {status}: {pred.get('error')}")
-            time.sleep(poll)
-            pred = c.get(pred["urls"]["get"], headers=headers).json()
-    raise ProviderError(f"replicate did not finish within {timeout:.0f}s")
+    if pred.get("status") in {"failed", "canceled"}:
+        raise ProviderError(f"replicate {pred.get('status')}: {redact(str(pred.get('error')))}")
+
+    out = pred.get("output")
+    url = out[0] if isinstance(out, list) and out else out
+    if not isinstance(url, str):
+        raise ProviderError(f"replicate returned no video url: {redact(str(out))[:300]}")
+    return url
