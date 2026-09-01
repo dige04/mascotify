@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mascotify — animated mascots for your app</title>
+<link rel="stylesheet" href="/app.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🤖</text></svg>">
+</head>
+<body>
+
+<header class="bar">
+  <div class="brand">
+    <span class="mark" aria-hidden="true"></span>
+    <b>mascotify</b>
+    <span class="ver" id="ver"></span>
+  </div>
+  <div class="bar-right">
+    <button class="chip" id="open-settings">
+      <span class="dot" id="key-dot"></span>
+      <span id="provider-label">provider</span>
+    </button>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- ── step 1 ─────────────────────────────────────────── -->
+  <section class="step" id="s1">
+    <div class="step-head">
+      <span class="num">1</span>
+      <div>
+        <h2>The anchor</h2>
+        <p class="sub">One canonical still. Every animation is generated from it, so the
+          mascot stays itself across screens.</p>
+      </div>
+    </div>
+
+    <div class="cols">
+      <div class="stack">
+        <label for="character">Describe your mascot</label>
+        <textarea id="character" rows="4" placeholder="a friendly rounded robot, big single visor eye, teal and cream, chunky proportions"></textarea>
+        <div class="row">
+          <button class="primary" id="btn-anchor">Generate anchor</button>
+          <span class="or">or</span>
+          <label class="ghost" for="upload">Upload your own</label>
+          <input type="file" id="upload" accept="image/*" hidden>
+        </div>
+        <p class="hint">Uploading works best with art on a flat background and no drop shadow.</p>
+      </div>
+
+      <figure class="canvas" id="anchor-frame">
+        <div class="empty" id="anchor-empty">
+          <span>anchor appears here</span>
+        </div>
+        <img id="anchor-img" alt="" hidden>
+      </figure>
+    </div>
+  </section>
+
+  <!-- ── step 2 ─────────────────────────────────────────── -->
+  <section class="step locked" id="s2">
+    <div class="step-head">
+      <span class="num">2</span>
+      <div>
+        <h2>The motion</h2>
+        <p class="sub">These all keep the character planted with the camera still, which is
+          what survives being drawn a dozen times.</p>
+      </div>
+    </div>
+
+    <div class="motions" id="motions"></div>
+
+    <div class="controls">
+      <label>Frames
+        <select id="grid">
+          <option value="3x4" selected>12 — 4x3 grid</option>
+          <option value="4x6">24 — 6x4 grid, smoother</option>
+          <option value="2x4">8 — 4x2 grid, cheaper</option>
+        </select>
+      </label>
+      <label>Playback
+        <select id="fps">
+          <option value="8">8 fps — sleepy</option>
+          <option value="12" selected>12 fps — standard</option>
+          <option value="24">24 fps — fluid</option>
+        </select>
+      </label>
+      <button class="primary" id="btn-animate" disabled>Animate</button>
+    </div>
+    <p class="hint" id="cost-hint"></p>
+
+    <div class="alt">
+      <span>Already generated a sheet with your coding agent?</span>
+      <label class="ghost" for="sheet-upload">Drop it in instead</label>
+      <input type="file" id="sheet-upload" accept="image/*" hidden>
+      <span class="note">No key needed — validates and exports the same way.</span>
+    </div>
+  </section>
+
+  <!-- ── step 3 ─────────────────────────────────────────── -->
+  <section class="step locked" id="s3">
+    <div class="step-head">
+      <span class="num">3</span>
+      <div>
+        <h2>Ship it</h2>
+        <p class="sub">Every bundle carries the snippet that plays it.</p>
+      </div>
+    </div>
+
+    <div class="cols">
+      <figure class="canvas stage">
+        <div class="empty" id="preview-empty"><span>preview appears here</span></div>
+        <img id="preview-img" alt="" hidden>
+        <figcaption id="preview-cap"></figcaption>
+      </figure>
+
+      <div class="stack">
+        <dl class="stats" id="stats"></dl>
+        <div class="row wrap-row" id="export-row" hidden>
+          <button class="primary" id="btn-zip">Download bundle</button>
+          <button class="ghost" id="btn-compare">Check identity</button>
+          <button class="ghost" id="btn-sheet">View raw sheet</button>
+        </div>
+        <div class="snips" id="snips"></div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="foot">
+  <span>Generated art is governed by your provider's terms, not mascotify's licence.</span>
+  <a href="https://github.com/dige04/mascotify" target="_blank" rel="noopener">source</a>
+</footer>
+
+<!-- ── settings ─────────────────────────────────────────── -->
+<dialog id="settings">
+  <form method="dialog" class="sheet">
+    <h3>Provider</h3>
+    <p class="sub">Your key stays in this local server's memory. It is never written to
+      disk and never sent to the browser.</p>
+
+    <label>Service
+      <select id="set-provider"></select>
+    </label>
+    <label>API key
+      <input type="password" id="set-key" placeholder="leave blank to keep the current one" autocomplete="off">
+    </label>
+    <label>Model
+      <input type="text" id="set-model" spellcheck="false">
+    </label>
+    <p class="hint">Catalogues change often. If a model is rejected, put a current id here.</p>
+
+    <div class="row end">
+      <button class="ghost" value="cancel">Cancel</button>
+      <button class="primary" id="set-save" value="save">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="/app.js"></script>
+</body>
+</html>

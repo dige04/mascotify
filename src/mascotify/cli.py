@@ -259,6 +259,34 @@ def cmd_video(args: argparse.Namespace) -> int:
     return run_video(args)
 
 
+def cmd_serve(args: argparse.Namespace) -> int:
+    """Run the local web UI.
+
+    Unlike every other command this one needs a provider key, because the
+    browser has no coding agent to generate with. The key stays in this
+    process's memory.
+    """
+    try:
+        import uvicorn
+    except ImportError:
+        _say(f"{RED}error:{RESET} the web UI needs: pip install 'mascotify[web]'")
+        return 1
+    from .web.app import create_app
+
+    root = Path(args.root).resolve()
+    url = f"http://{args.host}:{args.port}"
+    _say(f"{BOLD}mascotify{RESET} serving {DIM}{root}{RESET}")
+    _say(f"  {GREEN}{url}{RESET}\n")
+    if not args.no_open:
+        import threading
+        import webbrowser
+
+        threading.Timer(0.8, lambda: webbrowser.open(url)).start()
+
+    uvicorn.run(create_app(root), host=args.host, port=args.port, log_level="warning")
+    return 0
+
+
 def cmd_skill(args: argparse.Namespace) -> int:
     """Install the agent skill so a coding agent can drive mascotify itself."""
     src = Path(__file__).parent / "assets" / "SKILL.md"
@@ -374,6 +402,13 @@ def build_parser() -> argparse.ArgumentParser:
     v.add_argument("--job", help="job name")
     v.add_argument("--yes", action="store_true", help="skip the cost confirmation")
     v.set_defaults(func=cmd_video)
+
+    sv = sub.add_parser("serve", help="run the local web UI (needs a provider key)")
+    sv.add_argument("--host", default="127.0.0.1")
+    sv.add_argument("--port", type=int, default=8765)
+    sv.add_argument("--root", default=".", help="project root holding .mascotify/")
+    sv.add_argument("--no-open", action="store_true", help="do not open a browser")
+    sv.set_defaults(func=cmd_serve)
 
     s = sub.add_parser("install-skill", help="install the agent skill")
     s.add_argument("--agent", choices=["claude", "codex", "all"], default="all")

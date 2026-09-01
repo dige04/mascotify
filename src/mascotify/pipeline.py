@@ -111,25 +111,27 @@ def process(
     cut, report = analyse(Image.open(sheet_path), spec)
     job.prepare()
     cut.save(job.dir / "sheet-cut.png")
-    (job.dir / "report.json").write_text(
-        json.dumps(
-            {
-                "ok": report.ok,
-                "frames_found": report.found,
-                "frames_expected": report.expected,
-                "rows": report.rows,
-                "cols": report.cols,
-                "scale_spread": round(report.scale_spread, 4),
-                "baseline_spread": round(report.baseline_spread, 4),
-                "clipped": [i + 1 for i in report.clipped],
-                "problems": report.problems(),
-            },
-            indent=2,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
 
+    def _write_report(extra: dict | None = None) -> None:
+        """Written twice: once so a rejected sheet still leaves a record, and
+        again with the loop measurements once the export succeeds."""
+        payload = {
+            "ok": report.ok,
+            "frames_found": report.found,
+            "frames_expected": report.expected,
+            "rows": report.rows,
+            "cols": report.cols,
+            "scale_spread": round(report.scale_spread, 4),
+            "baseline_spread": round(report.baseline_spread, 4),
+            "clipped": [i + 1 for i in report.clipped],
+            "problems": report.problems(),
+            **(extra or {}),
+        }
+        (job.dir / "report.json").write_text(
+            json.dumps(payload, indent=2) + "\n", encoding="utf-8"
+        )
+
+    _write_report()
     if strict and not report.ok:
         return Result(report=report)
 
@@ -147,6 +149,16 @@ def process(
     preview = write_animation(loop, job.dir / "preview.webp", fps=spec.sheet.fps)
     bundles = export_all(
         atlas, loop, job.out_dir, job.name, targets=targets, base_pt=spec.sheet.base_pt
+    )
+
+    _write_report(
+        {
+            "seam": round(seam, 4),
+            "fps": spec.sheet.fps,
+            # Kept so a reopened job can show how to use each bundle without
+            # re-running the export just to recover a one-line string.
+            "snippets": {b.target: b.snippet for b in bundles},
+        }
     )
 
     return Result(

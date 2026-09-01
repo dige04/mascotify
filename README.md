@@ -16,9 +16,30 @@ mascotify install-skill          # teach your agent to drive it
 
 Then, in your agent: *"make me a waving robot mascot for this app."*
 
-## What makes this different from a web app
+Prefer a UI? `mascotify serve` runs a local web app on the same pipeline.
 
-**It writes into your repo.** Exports are not a zip in your Downloads folder.
+## The web app
+
+```bash
+uv tool install 'mascotify[web]'
+mascotify serve            # http://127.0.0.1:8765
+```
+
+Describe a mascot, pick a motion, get an animated preview and every platform
+bundle as one download. It runs locally, and a key you paste into settings stays
+in that process's memory — never written to disk, never sent back to the browser.
+
+The one thing it needs that the CLI does not is a provider key, because a
+browser has no coding agent to draw with. Pick from OpenAI, Gemini, fal or
+Replicate in settings.
+
+There is a key-free route through it too: generate a sheet with your coding
+agent, then drop it into step 2. Validation, preview and export are identical —
+the browser only ever replaces the drawing step.
+
+## What makes this different from a hosted product
+
+**It writes into your repo.** From the CLI, exports are not a zip in your Downloads folder.
 `ingest` drops an Xcode `.imageset` with a SwiftUI view, a `res/drawable` WebP
 with the Kotlin to play it, a CSS `steps()` sheet, a Godot `SpriteFrames`
 resource — each with the snippet that actually runs it.

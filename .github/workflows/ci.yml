@@ -32,7 +32,7 @@ jobs:
           fi
 
       - name: Install
-        run: uv sync --python ${{ matrix.python }} --extra byok
+        run: uv sync --python ${{ matrix.python }} --extra byok --extra web
 
       - name: Test
         run: uv run pytest tests/ -v
