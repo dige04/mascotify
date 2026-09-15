@@ -15,11 +15,13 @@ Full sequence from an empty directory:
       --directions directions.png --reactions reactions.png
     BUILD=. python .../spike/readme_images.py
 
-The web app screenshot is captured separately, because it needs the server:
+The web app screenshot and the tracking clip are captured separately, because
+both need the server running:
 
     mascotify serve --port 8795 --no-open &
     chrome --headless=new --hide-scrollbars --virtual-time-budget=4000 \
       --window-size=1280,935 --screenshot=ui.png http://127.0.0.1:8795/
+    python .../spike/capture_tracking.py            # docs/tracking.webp
 """
 import os
 from pathlib import Path
@@ -175,8 +177,8 @@ def poses():
 
         label(d, (x + 2, top + sheet_w + 18), name, 13, ACCENT)
         label(d, (x + 2 + label_w(d, name, 13) + 14, top + sheet_w + 18), note, 12, INK_3)
-    img.save(str(DOCS / "poses.png"))
-    print(str(DOCS / "poses.png"), img.size)
+    img.save(str(DOCS / "poses.webp"), format="WEBP", lossless=True, method=6)
+    print(str(DOCS / "poses.webp"), img.size)
 
 
 hero()

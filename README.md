@@ -3,18 +3,18 @@
 ![An anchor still, the twelve-frame sprite sheet generated from it, and the
 mascot waving — the three stages of one mascotify run](docs/hero.webp)
 
-Turn one character image into production-ready animated mascot assets — sprite
-sheets, animated WebP, Lottie, and bundles for iOS, Android, web, Unity and
-Godot.
+Turn one character image into production-ready mascot assets — sprite sheets,
+animated WebP, Lottie, and bundles for iOS, Android, web, Unity and Godot. Or
+into a character that watches the cursor and blinks when you poke it.
 
 **No API key on the CLI path.** Your coding agent is the image provider:
 mascotify compiles the prompt, the agent's own image tool draws it, mascotify
 measures the result and exports it. Codex's built-in `image_gen`, or any agent
 that can generate an image, is enough.
 
-The web app is the exception — a browser has no agent to draw with, so
-`mascotify serve` wants a provider key unless you feed it a sheet you already
-generated.
+A browser has no agent of its own, so the web app shells out to the one you are
+already signed in to. Still no key — just slower, because a turn through an
+agent takes a minute where an API call takes seconds.
 
 ```bash
 uv tool install git+https://github.com/dige04/mascotify.git
@@ -22,8 +22,6 @@ mascotify install-skill          # teach your agent to drive it
 ```
 
 Then, in your agent: *"make me a waving robot mascot for this app."*
-
-Prefer a UI? `mascotify serve` runs a local web app on the same pipeline.
 
 ## The web app
 
@@ -39,9 +37,10 @@ pipeline](docs/webapp.webp)
 Describe a mascot, pick a motion, get an animated preview and every platform
 bundle as one download.
 
-The mascot in that masthead is not a mockup. `spike/demo_mascot.py` draws the
-two grids, `pose-ingest` validates and exports them, and the app loads the
-`.webp` files it wrote — the same path any character goes through.
+The mascot in that masthead is not a mockup, and it is not a still either —
+see it moving [below](#a-mascot-that-follows-the-cursor). `spike/demo_mascot.py`
+draws the two grids, `pose-ingest` validates and exports them, and the app loads
+the `.webp` files it wrote — the same path any character goes through.
 
 **It needs no key either.** The default provider is `agent`: mascotify shells
 out to the coding agent you already have signed in — Codex, or Gemini CLI — and
@@ -119,7 +118,14 @@ poses, nine head directions and nine expressions, with nothing playing.
 
 ![Two 3x3 grids of the same robot: on the left its head and eye turn to each
 of nine compass directions, on the right nine expressions from surprised to
-sleepy to heart-eyed](docs/poses.png)
+sleepy to heart-eyed](docs/poses.webp)
+
+Which together do this — the masthead mascot from the screenshot above,
+answering a cursor walked in a circle around it, then poked:
+
+<img src="docs/tracking.webp" width="300"
+     alt="The robot's eye tracking a cursor around a full circle, then its
+          expression changing when clicked">
 
 ```bash
 mascotify pose-plan --ref ref.png --job fox     # prompts for both grids
