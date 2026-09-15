@@ -272,10 +272,13 @@ def process_pair(
             json.dumps(report.as_dict(), indent=2) + "\n", encoding="utf-8"
         )
 
-    # Bail before slicing if either grid is wrong: normalising a set with the
-    # wrong number of cells produces a bundle whose poses are in the wrong
-    # places, which measures fine and tracks the cursor backwards.
-    if strict and (
+    # Bail before slicing if either grid is wrong. Deliberately not gated on
+    # `strict`: everything below assumes eighteen cells in a known order, so
+    # there is no bundle to force out of a short grid — only a crash in pack()
+    # or, worse, nine poses silently mapped to the wrong compass directions.
+    # `--force` exists to ship a pair whose placement is a little loose, not to
+    # ship one whose cells mean something other than what they claim.
+    if (
         report.grid_problems(dir_report, "directions")
         or report.grid_problems(react_report, "reactions")
     ):

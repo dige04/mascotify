@@ -178,8 +178,13 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     if rep.clipped:
         _say(f"{BOLD}clip{RESET}  frames {', '.join(str(i + 1) for i in rep.clipped)}")
 
-    if not rep.ok and not args.force:
+    if result.bundle is None or (not rep.ok and not args.force):
         _say(f"\n{RED}validation failed{RESET}")
+        if result.bundle is None and args.force:
+            _say(
+                f"  {DIM}--force cannot bypass a wrong cell count — which cell holds which "
+                f"pose is the contract, not a tolerance{RESET}"
+            )
         for p in rep.problems():
             _say(f"  {RED}!{RESET} {p}")
         _say(f"\n{YELLOW}Regenerate with this follow-up, then ingest again:{RESET}\n")
@@ -339,10 +344,9 @@ def cmd_pose_plan(args: argparse.Namespace) -> int:
     job = PoseJob(root=root, spec=spec)
     job.prepare()
 
-    chosen = list(REACTIONS.items())
     texts = {
         "directions": prompts.directions_prompt(spec),
-        "reactions": prompts.reactions_prompt(spec, chosen),
+        "reactions": prompts.reactions_prompt(spec),
     }
     for which, text in texts.items():
         (job.dir / f"{which}-prompt.txt").write_text(text + "\n", encoding="utf-8")
@@ -438,8 +442,13 @@ def cmd_pose_ingest(args: argparse.Namespace) -> int:
     _say(f"{BOLD}scale{RESET}      reactions at {rep.scale_match:.0%} of directions "
          f"{DIM}(budget 90-110%){RESET}")
 
-    if not rep.ok and not args.force:
+    if result.bundle is None or (not rep.ok and not args.force):
         _say(f"\n{RED}validation failed{RESET}")
+        if result.bundle is None and args.force:
+            _say(
+                f"  {DIM}--force cannot bypass a wrong cell count — which cell holds which "
+                f"pose is the contract, not a tolerance{RESET}"
+            )
         for p in rep.problems():
             _say(f"  {RED}!{RESET} {p}")
         # Name the sheet that actually has to be redrawn. Falling back to a

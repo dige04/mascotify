@@ -104,7 +104,7 @@ def test_directions_prompt_enumerates_every_cell_by_position():
 
 
 def test_reactions_prompt_names_every_expression():
-    text = reactions_prompt(PoseJobSpec(), list(REACTIONS.items()))
+    text = reactions_prompt(PoseJobSpec())
     for desc in REACTIONS.values():
         assert desc in text
 
@@ -288,3 +288,49 @@ def test_a_repair_prompt_names_the_sheet_that_has_to_be_redrawn(tmp_path):
     problems = result.report.problems()
     assert any(p.startswith("directions:") for p in problems)
     assert not any(p.startswith("reactions:") for p in problems)
+
+
+def test_force_cannot_ship_a_grid_with_the_wrong_cell_count(tmp_path, pair):
+    """`--force` loosens the placement budgets, not the cell contract.
+
+    Nine poses are nine specific poses. Forcing an eight-cell grid through would
+    shift every pose after the gap into the wrong compass direction — output
+    that measures perfectly and tracks the cursor wrong.
+    """
+    d, r = pair()
+    sheet = Image.open(d)
+    ImageDraw.Draw(sheet).rectangle([280, 280, 419, 419], fill=KEY)
+    sheet.save(d)
+
+    result = process_pair(d, r, job_for(tmp_path), strict=False)
+    assert result.bundle is None
+    assert not result.ok
+
+
+def test_force_still_ships_a_pair_whose_placement_is_loose(tmp_path):
+    d, r = tmp_path / "d.png", tmp_path / "r.png"
+    make_pose_sheet(body_drift=2).save(d)
+    make_pose_sheet(head_dx=(0,) * 9).save(r)
+
+    assert process_pair(d, r, job_for(tmp_path)).bundle is None
+    forced = process_pair(d, r, job_for(tmp_path / "forced"), strict=False)
+    assert forced.bundle is not None
+    assert not forced.ok, "forcing exports, it does not make the report pass"
+
+
+def test_an_oversized_pair_is_capped_and_stays_square(tmp_path):
+    """The cap resizes to a square target, which is only safe after squarify."""
+    from mascotify.pose import MAX_CELL
+
+    d, r = tmp_path / "d.png", tmp_path / "r.png"
+    make_pose_sheet(cell=900, body=400, head=300, head_dx=(-150, 0, 150) * 3).save(d)
+    make_pose_sheet(cell=900, body=400, head=300, head_dx=(0,) * 9).save(r)
+
+    result = process_pair(d, r, job_for(tmp_path))
+    assert result.ok, result.report.problems()
+    for f in result.directions + result.reactions:
+        assert f.size == (MAX_CELL, MAX_CELL)
+
+    sheet = next(p for p in result.bundle.files if p.name.endswith("-directions.webp"))
+    with Image.open(sheet) as im:
+        assert im.size == (3 * MAX_CELL, 3 * MAX_CELL)

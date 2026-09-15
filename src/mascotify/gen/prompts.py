@@ -195,12 +195,19 @@ def directions_prompt(job: "PoseJobSpec") -> str:
     )
 
 
-def reactions_prompt(job: "PoseJobSpec", reactions: list[tuple[str, str]]) -> str:
-    """The nine expressions shown on a click."""
+def reactions_prompt(job: "PoseJobSpec") -> str:
+    """The nine expressions shown on a click.
+
+    Takes no selection, unlike `MOTIONS` where the caller picks one: the grid
+    holds exactly nine cells and REACTIONS holds exactly nine entries, so there
+    is no subset to choose.
+    """
+    from ..spec import REACTIONS
+
     return _pose_frame(
         job,
         "the EXACT SAME character as the reference image, whose design is the invariant",
-        reactions,
+        list(REACTIONS.items()),
         "the facial expression",
     )
 
