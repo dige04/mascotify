@@ -165,3 +165,62 @@ def apply_loop(frames: list[Image.Image], *, ping_pong: bool | None = None) -> l
     if not ping_pong:
         return list(frames)
     return list(frames) + list(reversed(frames[1:-1]))
+
+
+def foot_anchor_x(img: Image.Image, frac: float = 0.25) -> float:
+    """Horizontal centre of the character's base.
+
+    `normalize(align="baseline")` centres each frame on its own bbox, which is
+    right for a loop where the silhouette stays put but wrong for a pose set. On
+    a directions grid the head turns, the bbox grows on that side, and
+    bbox-centring slides the body the *other* way — so the mascot counter-slides
+    away from the cursor it is supposed to be following.
+
+    The bottom slice is the fix: feet do not move when a head turns, so the
+    alpha-weighted centre of the lowest `frac` of the character is a body-fixed
+    point that a head turn or a raised arm leaves alone.
+    """
+    a = np.asarray(img.convert("RGBA"), dtype=np.float32)[..., 3]
+    ys, xs = np.nonzero(a)
+    if len(ys) == 0:
+        return img.width / 2.0
+    cut = ys.max() - max(1.0, (ys.max() - ys.min() + 1) * frac)
+    keep = ys >= cut
+    xs, weights = xs[keep], a[ys[keep], xs[keep]]
+    total = weights.sum()
+    if total == 0:
+        return img.width / 2.0
+    return float((xs * weights).sum() / total)
+
+
+def anchor_horizontally(frames: list[Image.Image], *, frac: float = 0.25) -> list[Image.Image]:
+    """Shift already-normalised frames onto one shared body anchor.
+
+    Runs after `normalize`, not instead of it: normalize picks the canvas and
+    the baseline, this only slides each frame sideways.
+
+    Deliberately returns no drift measurement. Most of the spread it corrects
+    here is the bbox-centring `normalize` just applied, not anything the
+    generator did — measuring it at this point reads 22% on a fixture whose body
+    is nailed to the same pixel in all nine cells. Whether the *generator* moved
+    the body is a different question, answered in sheet coordinates before any
+    of this runs.
+    """
+    if not frames:
+        return []
+
+    anchors = [foot_anchor_x(f, frac) for f in frames]
+    target = float(np.median(anchors))
+
+    out: list[Image.Image] = []
+    for frame, ax in zip(frames, anchors):
+        dx = round(target - ax)
+        if dx == 0:
+            out.append(frame)
+            continue
+        # Shift within the existing canvas rather than growing it: normalize
+        # already sized it, and the pose pair has to stay square.
+        shifted = Image.new("RGBA", frame.size, (0, 0, 0, 0))
+        shifted.alpha_composite(frame, (max(dx, 0), 0), (max(-dx, 0), 0, frame.width, frame.height))
+        out.append(shifted)
+    return out

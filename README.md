@@ -97,7 +97,45 @@ mascotify motions                          # wave idle bounce nod blink point ty
 mascotify doctor sheet.png                 # measure without exporting, JSON out
 mascotify compare --ref ref.png --against sheet.png   # size-matched identity strip
 mascotify plan --rows 4 --cols 6 --fps 24  # 24 frames, still no key needed
+mascotify poses                            # the pose vocabulary, for the cursor-tracker
 ```
+
+## A mascot that follows the cursor
+
+Not every mascot animates. If what you want is a character that watches the
+pointer and reacts to a click, that is not a loop — it is two 3x3 grids of
+poses, nine head directions and nine expressions, with nothing playing.
+
+```bash
+mascotify pose-plan --ref ref.png --job fox     # prompts for both grids
+mascotify pose-ingest --job fox \
+  --directions .mascotify/poses/fox/directions.png \
+  --reactions  .mascotify/poses/fox/reactions.png
+```
+
+The export is two lossless `.webp` sheets and the JSX, for
+[page-mascot](https://github.com/nilbuild/page-mascot) — an npm component that
+does the rendering. Lossless because the component samples cells with
+`background-position`, and a lossy edge shows up at runtime as a sliver of the
+neighbouring pose down the side of the mascot.
+
+Both sheets are ingested in one call and normalised as eighteen frames on one
+canvas. Separately they would land on two canvases and two baselines, and the
+character would jump every time you poked it.
+
+The measurement that matters here is different from the animation path's. A
+turned head widens the character's bounding box, so centring each cell on its
+own box slides the body *away* from the side the head turned towards — a mascot
+that leans away from the cursor following it. So placement is measured from the
+feet up, against the cell the character was drawn in, before anything is
+normalised: that tells a head that turns apart from a body that walks around,
+which a bounding box cannot. It is also the only way to catch the two sheets
+seating the body in different places, which is invisible until the first click.
+
+One thing it cannot check is cell order. Nine plausible head turns in the wrong
+cells measure perfectly and track the cursor backwards, so `pose-plan` tells the
+agent to look at the sheet and confirm — the same division of labour as the rest
+of the tool.
 
 ## Does the agent loop actually work?
 
@@ -256,3 +294,10 @@ packaged web assets, so source-tree-only successes do not hide release defects.
 open-source, local-first alternative to. Its public API shape informed the
 pipeline design — the anchor step and grid detection in particular are ideas
 worth borrowing.
+
+[page-mascot](https://github.com/nilbuild/page-mascot) solves a different
+problem well: one specific, finished thing — a cursor-following character for a
+web page — that you can install and use without generating anything, from a
+gallery of characters someone already drew. mascotify does not compete with
+that; it generates assets, and `pose-ingest` writes them in the format that
+component reads.

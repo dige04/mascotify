@@ -156,3 +156,50 @@ If a sheet has drifted, reroll it against the anchor rather than accepting a
 mascot that changes between screens. If several rerolls keep drifting the same
 way, the anchor is probably ambiguous about that detail — regenerate the anchor
 with it stated explicitly, and start over from there.
+
+## A mascot that follows the cursor, instead of animating
+
+If the user wants a character that watches the mouse and reacts to clicks on a
+web page — not a loop that plays on its own — that is a different shape of asset
+and a different path through the tool. It targets
+[page-mascot](https://github.com/nilbuild/page-mascot), an npm component that
+renders it.
+
+It is two 3x3 grids of **poses**, not frames: nine head directions, and nine
+expressions. Nothing plays. The pointer's angle picks a cell on the first grid,
+a click shows a cell on the second.
+
+```bash
+mascotify poses                                   # the two vocabularies
+mascotify pose-plan --ref ref.png --job fox       # prompts for both grids
+        ↓  you generate both sheets
+mascotify pose-ingest --job fox \
+  --directions .mascotify/poses/fox/directions.png \
+  --reactions  .mascotify/poses/fox/reactions.png
+```
+
+Start from the same `ref.png` anchor as step 1 — the identity problem is
+identical, and the two grids have to agree with each other as well as with the
+anchor.
+
+**Both sheets go in one command.** They are normalised together, as eighteen
+frames on one canvas. Ingesting them separately would give two canvases and two
+baselines, and the character would jump every time it was clicked. There is no
+half-finished state to stop at, so generate both before ingesting either.
+
+**Cell order on the directions grid is the contract, and nothing can check it.**
+Cell 1 is up-left, cell 5 is the resting pose facing the viewer, cell 9 is
+down-right — `mascotify poses` prints all nine. A sheet with the directions
+shuffled measures perfectly and tracks the cursor backwards. So look at it:
+confirm cell 5 faces front and each head turns towards the corner its own cell
+sits in. This is exactly the check only you can do.
+
+What `pose-ingest` does measure is placement. It reports, per sheet, how far the
+body wanders between cells, and how far apart the two sheets seat it — a head
+that turns is fine, a body that walks around is not. It deliberately does *not*
+gate on the frame-scale spread the animation path uses: an arms-up "surprised"
+cell really is taller than a neutral one, and rejecting that would reject a
+correct sheet.
+
+The export is two `.webp` sheets plus the JSX. They go in `public/mascots/`
+alongside `npm i page-mascot`; `pose-ingest` prints the snippet.

@@ -8,7 +8,7 @@ amputating the bottom row. Models allocate exactly the space you name.
 
 from __future__ import annotations
 
-from ..spec import CutoutSpec, JobSpec, MotionSpec, SheetSpec
+from ..spec import CutoutSpec, JobSpec, MotionSpec, PoseJobSpec, SheetSpec
 
 # gpt-image-2 wants both edges on a multiple of 16 and the long:short ratio
 # within 3:1. Generators ignore the request often enough that nothing
@@ -141,3 +141,78 @@ When the file is saved, run:
   {next_command}
 
 {next_note}"""
+
+
+# --------------------------------------------------------------------------- poses
+
+
+def _pose_frame(job: "PoseJobSpec", subject: str, cells: list[tuple[str, str]], what: str) -> str:
+    """Shared scaffolding for the two pose grids.
+
+    Deliberately close to `sheet_prompt` — same margin rule, same flat backdrop,
+    same identity invariants — because those clauses were earned the same way.
+    What differs is that the cells are enumerated rather than described as a
+    motion: there is no "smooth loop" to interpolate, each cell is a distinct
+    named pose and the model has to be told which cell holds which.
+    """
+    p = job.pose
+    key = job.cutout.key_color
+    listing = "\n".join(
+        f"  cell {i + 1} ({'top' if i < 3 else 'middle' if i < 6 else 'bottom'}-"
+        f"{('left', 'centre', 'right')[i % 3]}): {desc}"
+        for i, (_, desc) in enumerate(cells)
+    )
+    return f"""Use case: stylized-concept
+Asset type: character pose sheet, {p.cells} poses, {what}
+Primary request: a {p.cols}-column by {p.rows}-row grid of {p.cells} poses of {subject}
+Input images: Image 1: the reference character; its design is the invariant
+Composition/framing: exactly {p.cols} equal columns and {p.rows} equal rows of equal-size cells, \
+read left-to-right then top-to-bottom. The cells are, in that order:
+{listing}
+In EVERY cell it is the identical character at the IDENTICAL scale, drawn from the IDENTICAL \
+camera angle, with its body in the IDENTICAL position and its feet on the IDENTICAL vertical \
+baseline. The body does not move, shift sideways, lean, or change size between cells — only \
+{what} changes.
+Constraints: leave at least 10% of the canvas height as empty background below the bottom row \
+and above the top row. Every character must sit fully inside its own cell with visible \
+background on all four sides. NO character may touch or cross any canvas edge. Background must \
+be completely flat solid {key} across the whole canvas and inside every cell; no drop shadow, \
+no ground shadow.
+Avoid: visible grid lines, cell borders, dividers, arrows, frame numbers, labels, captions, \
+text, watermark; resizing, re-cropping or re-posing the body between cells; changing the camera \
+angle; any character touching a canvas edge"""
+
+
+def directions_prompt(job: "PoseJobSpec") -> str:
+    """The nine head directions a cursor-tracker reads by compass position."""
+    from ..spec import DIRECTIONS
+
+    return _pose_frame(
+        job,
+        "the EXACT SAME character as the reference image, whose design is the invariant",
+        list(DIRECTIONS),
+        "the direction the head and eyes are looking",
+    )
+
+
+def reactions_prompt(job: "PoseJobSpec", reactions: list[tuple[str, str]]) -> str:
+    """The nine expressions shown on a click."""
+    return _pose_frame(
+        job,
+        "the EXACT SAME character as the reference image, whose design is the invariant",
+        reactions,
+        "the facial expression",
+    )
+
+
+def pose_repair_prompt(problems: list[str], job: "PoseJobSpec", which: str) -> str:
+    """A targeted follow-up after a pose grid failed validation."""
+    bullets = "\n".join(f"- {p}" for p in problems)
+    return f"""The previous {which} sheet failed automated validation:
+
+{bullets}
+
+Regenerate the sheet fixing ONLY those problems. Keep the same character design, the same \
+{job.pose.cols}x{job.pose.rows} grid, the same pose in the same cell, and the same flat \
+{job.cutout.key_color} background. The character must stay identical to the previous sheet in \
+every other respect."""
