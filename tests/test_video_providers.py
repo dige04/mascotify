@@ -269,3 +269,23 @@ def test_the_error_contract_the_cli_relies_on():
     assert issubclass(providers.ProviderError, RuntimeError)
     with pytest.raises(providers.ProviderError):
         raise net.HttpError("boom")
+
+
+def test_an_ambiguous_submit_is_not_retried_and_double_billed(stub, ref, tmp_path, monkeypatch):
+    """The 502 case, which a 400 does not cover.
+
+    A 400 was never retried — it is not in RETRY_STATUS, so `send` refused it
+    anyway and the test passed without pinning anything. A 502 is the one that
+    matters: the POST may have landed and started a clip that bills on arrival,
+    with only the reply lost. This path costs real money per attempt.
+    """
+    calls = {"n": 0}
+
+    def ambiguous(self):
+        calls["n"] += 1
+        self.send_error(502)
+
+    monkeypatch.setattr(Stub, "do_POST", ambiguous)
+    with pytest.raises(providers.ProviderError):
+        run("fal", tmp_path / "c.mp4", image=ref)
+    assert calls["n"] == 1, "a submit that may have been billed must not be repeated"

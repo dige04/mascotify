@@ -193,13 +193,18 @@ def process(
     for i, f in enumerate(loop):
         f.save(job.frames_dir / f"{i:03d}.png")
 
-    # Clear the previous export before writing this one. Exports are per-frame
-    # on some targets — iOS writes one .imageset per frame — so re-running a
-    # job at a lower frame count used to leave the old frames behind, and the
-    # bundle shipped twelve images for a two-frame loop. Nothing downstream can
-    # tell which generation a leftover file came from.
-    if job.out_dir.exists():
-        shutil.rmtree(job.out_dir)
+    # Clear each target before rewriting it. Exports are per-frame on some
+    # targets — iOS writes one .imageset per frame — so re-running a job at a
+    # lower frame count used to leave the old frames behind, and the bundle
+    # shipped twelve images for a two-frame loop.
+    #
+    # Per target rather than the whole directory, because `--targets` lets the
+    # caller export a subset: wiping everything would delete a bundle they did
+    # not ask to rebuild and never mentioned wanting gone.
+    for t in targets:
+        stale = job.out_dir / t
+        if stale.exists():
+            shutil.rmtree(stale)
 
     atlas = pack(loop, fps=spec.sheet.fps)
     preview = write_animation(loop, job.dir / "preview.webp", fps=spec.sheet.fps)

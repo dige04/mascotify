@@ -230,6 +230,8 @@ def download(
     timeout: float,
     max_bytes: int | None = None,
     accept: tuple[str, ...] = IMAGE_TYPES,
+    attempts: int = MAX_ATTEMPTS,
+    sleep: Callable[[float], None] | None = None,
 ) -> bytes:
     """Fetch a result asset into memory, refusing anything that is not one.
 
@@ -251,6 +253,8 @@ def download(
         max_bytes=max_bytes,
         accept=accept,
         sink=sink,
+        attempts=attempts,
+        sleep=sleep,
     )
     return b"".join(chunks)
 
@@ -265,6 +269,8 @@ def download_to(
     timeout: float,
     max_bytes: int | None = None,
     accept: tuple[str, ...] = VIDEO_TYPES,
+    attempts: int = MAX_ATTEMPTS,
+    sleep: Callable[[float], None] | None = None,
 ) -> Path:
     """Stream a result asset to disk under the same guards.
 
@@ -292,6 +298,8 @@ def download_to(
                 max_bytes=max_bytes,
                 accept=accept,
                 sink=sink,
+                attempts=attempts,
+                sleep=sleep,
             )
         # Rename only once the whole body arrived, so a truncated download can
         # never be mistaken for a finished clip on a later run.

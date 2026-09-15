@@ -130,7 +130,9 @@ def _fal(c, key, model, image, prompt, duration, timeout, poll, redact) -> str:
     payload = {"image_url": _data_uri(image), "prompt": prompt, "duration": str(duration)}
 
     job = net.json_of(
-        net.send(
+        # submit, not send: this POST starts a clip that bills on arrival, so a
+        # 502 here is ambiguous rather than transient. See net.submit.
+        net.submit(
             lambda: c.post(f"{BASE_URLS['fal']}/{model}", headers=hdr, json=payload),
             provider="fal",
             model=model,
@@ -176,7 +178,8 @@ def _replicate(c, key, model, image, prompt, duration, timeout, poll, redact) ->
     payload = {"input": {"start_image": _data_uri(image), "prompt": prompt, "duration": duration}}
 
     pred = net.json_of(
-        net.send(
+        # submit, not send — same billing hazard as fal above.
+        net.submit(
             lambda: c.post(
                 f"{BASE_URLS['replicate']}/models/{model}/predictions",
                 headers=hdr,
