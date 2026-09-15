@@ -326,3 +326,64 @@ $("btn-compare").addEventListener("click", () => {
   }
   reflect();
 })();
+
+/* ── the hero mascot ────────────────────────────────────────
+
+   A live instance of what `mascotify pose-ingest` exports: the two 3x3 sheets
+   below are the files the pipeline wrote, not a mockup. The cursor's position
+   samples the directions sheet; a click swaps to the reactions sheet.
+
+   Kept to `background-position` on a 300% sheet rather than nine <img> tags,
+   which is what makes the swap instant — every pose is already decoded. */
+(() => {
+  const el = document.getElementById("demo-mascot");
+  if (!el) return;
+
+  const REACT_MS = 620;
+  const REACH = 420;               // px at which the gaze is fully committed
+  const fine = matchMedia("(pointer: fine)").matches;
+  const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  const at = (i) => {
+    const col = i % 3, row = (i / 3) | 0;
+    el.style.backgroundPosition = `${col * 50}% ${row * 50}%`;
+  };
+
+  let reacting = 0;
+  at(4);
+
+  // Tracking needs a cursor to track. Saying "move your cursor" on a phone
+  // promises something the next line then switches off.
+  const cap = document.getElementById("demo-cap");
+  if (cap) cap.textContent = fine ? "move your cursor — then poke him" : "tap him";
+
+  if (fine) {
+    addEventListener("pointermove", (e) => {
+      if (reacting) return;
+      const b = el.getBoundingClientRect();
+      // A dead zone in the middle band: without it the head twitches between
+      // neighbouring cells whenever the cursor sits near a boundary.
+      const z = (v) => (v < -0.34 ? 0 : v > 0.34 ? 2 : 1);
+      const nx = z(Math.max(-1, Math.min(1, (e.clientX - (b.left + b.width / 2)) / REACH)));
+      const ny = z(Math.max(-1, Math.min(1, (e.clientY - (b.top + b.height / 2)) / REACH)));
+      at(ny * 3 + nx);
+    }, { passive: true });
+  }
+
+  el.addEventListener("click", () => {
+    clearTimeout(reacting);
+    el.classList.add("reacting");
+    at(Math.floor(Math.random() * 9));
+    if (!still) {
+      el.animate(
+        [{ transform: "scale(1)" }, { transform: "scale(.9, 1.08)" }, { transform: "scale(1)" }],
+        { duration: 340, easing: "cubic-bezier(.34,1.56,.64,1)" },
+      );
+    }
+    reacting = setTimeout(() => {
+      el.classList.remove("reacting");
+      reacting = 0;
+      at(4);
+    }, REACT_MS);
+  });
+})();
