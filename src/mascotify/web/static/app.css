@@ -124,51 +124,9 @@ body::after {
 .hero {
   padding: var(--s8) 0 var(--s7);
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(280px, 380px);
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
   gap: var(--s7);
   align-items: center;
-}
-
-/* The mascot stands on a lit disc rather than on nothing, so it reads as
-   placed in the room the rest of the page is lit by. */
-.demo { display: flex; flex-direction: column; align-items: center; gap: var(--s3); }
-
-.demo-pad {
-  width: 100%; max-width: 330px; aspect-ratio: 1;
-  display: grid; place-items: center;
-  border-radius: 50%;
-  background:
-    radial-gradient(52% 52% at 50% 58%,
-      color-mix(in oklab, var(--accent) 24%, transparent), transparent 72%);
-}
-
-.demo-mascot {
-  width: 232px; height: 232px;
-  background-image: url("/mascot-directions.webp");
-  background-size: 300% 300%;
-  background-position: 50% 50%;
-  background-repeat: no-repeat;
-  cursor: pointer;
-  /* The pose swap is a cut, not a tween — halfway between two head angles is
-     not a pose this character has. Only the glow under it eases. */
-  filter: drop-shadow(0 18px 26px rgba(0, 0, 0, .6));
-  transition: filter .25s;
-}
-.demo-mascot:hover { filter: drop-shadow(0 18px 34px color-mix(in oklab, var(--accent) 34%, transparent)); }
-.demo-mascot.reacting { background-image: url("/mascot-reactions.webp"); }
-
-.demo-cap {
-  margin: 0;
-  display: flex; align-items: center; gap: var(--s2);
-  font: 10.5px var(--mono);
-  text-transform: uppercase; letter-spacing: .14em;
-  color: var(--ink-3);
-}
-.live {
-  width: 6px; height: 6px; border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 9px var(--accent);
-  animation: pulse 2.4s ease-in-out infinite;
 }
 
 .kicker {
@@ -188,10 +146,7 @@ h1 {
 }
 /* The one italic on the page. It marks the claim the product is actually
    making — everything else here also generates a picture; this one moves. */
-h1 em {
-  font-style: italic;
-  color: var(--accent);
-}
+h1 em { font-style: italic; color: var(--accent); }
 
 .lede {
   margin: var(--s4) 0 0;
@@ -216,7 +171,77 @@ h1 em {
   font-size: 30px; font-weight: 600; letter-spacing: -0.04em;
   font-variant-numeric: tabular-nums;
 }
-.facts dd.zero { color: var(--accent); text-shadow: 0 0 22px color-mix(in oklab, var(--accent) 55%, transparent); }
+.facts dd.zero {
+  color: var(--accent);
+  text-shadow: 0 0 22px color-mix(in oklab, var(--accent) 55%, transparent);
+}
+
+/* The cast. A single character that only reacts when the pointer happens to
+   cross it reads as a widget; six of them turning together reads as the page
+   noticing you, which is the entire pitch of the thing they were exported for. */
+.demo { display: flex; flex-direction: column; align-items: center; gap: var(--s4); }
+
+.cast {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--s2);
+  width: 100%;
+}
+/* A fresh project has one character, and three columns would strand it in a
+   corner of its own grid. One gets the whole stage. */
+.cast.solo { grid-template-columns: 1fr; max-width: 320px; margin: 0 auto; }
+
+.cast figure {
+  margin: 0;
+  aspect-ratio: 1;
+  display: grid; place-items: center;
+  border-radius: 16px;
+  background: radial-gradient(56% 50% at 50% 62%,
+    color-mix(in oklab, var(--accent) 16%, transparent), transparent 72%);
+  transition: background .25s;
+}
+.cast figure:hover {
+  background: radial-gradient(60% 54% at 50% 62%,
+    color-mix(in oklab, var(--accent) 30%, transparent), transparent 74%);
+}
+
+/* The bob sits on a wrapper so it cannot fight the squash the click animates
+   onto the character itself. Each gets its own delay, or six characters
+   breathe in unison like a chorus line. */
+/* Needs its own width: `.demo-mascot` is sized in percent, and a shrink-to-fit
+   parent makes that circular — it resolved to zero and the characters vanished,
+   leaving nine cells of lit empty floor. */
+.cast .bob { width: 100%; animation: bob 4.4s ease-in-out infinite; }
+@keyframes bob { 50% { transform: translateY(-6px); } }
+
+.demo-mascot {
+  width: 100%; aspect-ratio: 1;
+  background-size: 300% 300%;
+  background-position: 50% 50%;
+  background-repeat: no-repeat;
+  cursor: pointer;
+  /* The pose swap is a cut, not a tween — halfway between two head angles is
+     not a pose this character has. Only the shadow under it eases. */
+  filter: drop-shadow(0 12px 16px rgba(0, 0, 0, .55));
+  transition: filter .25s;
+}
+.demo-mascot:hover {
+  filter: drop-shadow(0 12px 22px color-mix(in oklab, var(--accent) 38%, transparent));
+}
+
+.demo-cap {
+  margin: 0;
+  display: flex; align-items: center; gap: var(--s2);
+  font: 10.5px var(--mono);
+  text-transform: uppercase; letter-spacing: .14em;
+  color: var(--ink-3);
+}
+.live {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 9px var(--accent);
+  animation: pulse 2.4s ease-in-out infinite;
+}
 
 /* ── layout ─────────────────────────────────────────────── */
 
@@ -602,7 +627,7 @@ dialog::backdrop { background: rgba(2,3,5,.72); backdrop-filter: blur(4px); }
 @media (max-width: 860px) {
   .cols, .controls { grid-template-columns: 1fr; }
   .hero { padding: var(--s7) 0 var(--s6); grid-template-columns: 1fr; gap: var(--s6); }
-  .demo-pad { max-width: 300px; margin: 0 auto; }
+  .cast { max-width: 340px; margin: 0 auto; }
   h1 { white-space: normal; }
   .spine { padding-left: 0; }
   .spine::before { display: none; }

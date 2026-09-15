@@ -28,7 +28,7 @@ try:
 except ImportError as exc:  # pragma: no cover - optional extra
     raise SystemExit("the web app needs: pip install 'mascotify[web]'") from exc
 
-from .. import __version__, pipeline
+from .. import __version__, pipeline, pose
 from ..export.targets import TARGETS
 from ..gen import images, prompts
 from ..imaging import compare as cmp_mod
@@ -36,7 +36,15 @@ from ..imaging import grid as grid_mod
 from ..imaging import normalize as nz
 from ..imaging.cutout import cut_out
 from ..pipeline import Job
-from ..spec import MOTIONS, CutoutSpec, JobSpec, MotionSpec, SheetSpec
+from ..spec import (
+    MOTIONS,
+    POSE_SETS,
+    CutoutSpec,
+    JobSpec,
+    MotionSpec,
+    PoseJobSpec,
+    SheetSpec,
+)
 
 STATIC = Path(__file__).parent / "static"
 # Only this machine's own browser may talk to the server. Binding elsewhere is
@@ -367,6 +375,50 @@ def create_app(root: Path | None = None, *, allow_hosts: set[str] | None = None)
                 for b in result.bundles
             ],
         }
+
+    # ----------------------------------------------------------------- cast
+
+    @app.get("/api/cast")
+    def cast() -> list[dict]:
+        """The pose pairs this project has exported, for the masthead.
+
+        Read off disk rather than bundled with the package. A wall of stock
+        characters would weigh about a megabyte in the wheel and would be
+        someone else's art; this way the masthead fills up with the mascots you
+        made, and a fresh project falls back to the one that ships.
+        """
+        base = state.root / pose.WORKSPACE / "poses"
+        if not base.is_dir():
+            return []
+        out = []
+        for d in sorted(base.iterdir()):
+            spec = d / "job.json"
+            export = d / "export" / "page-mascot"
+            if not spec.exists() or not export.is_dir():
+                continue
+            name = d.name
+            if not (export / f"{name}-directions.webp").exists():
+                continue
+            try:
+                described = PoseJobSpec.load(spec).character
+            except (OSError, ValueError):
+                described = ""
+            out.append({"id": name, "alt": described or f"{name} mascot"})
+        return out
+
+    @app.get("/api/cast/{job}/{which}")
+    def cast_sheet(job: str, which: str):
+        if which not in POSE_SETS:
+            raise HTTPException(404, "no such sheet")
+        try:
+            pipeline.validate_job_name(job)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        p = (state.root / pose.WORKSPACE / "poses" / job / "export" / "page-mascot"
+             / f"{job}-{which}.webp")
+        if not p.exists():
+            raise HTTPException(404, "no such sheet")
+        return FileResponse(p, media_type="image/webp")
 
     # -------------------------------------------------------------- results
 

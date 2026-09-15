@@ -291,3 +291,60 @@ def test_the_browsers_own_requests_still_work(client):
 def test_reads_without_an_origin_header_are_allowed(client):
     """curl and the browser's own navigation send no Origin."""
     assert client.get("/api/config", headers={}).status_code == 200
+
+
+# ─── the masthead cast ─────────────────────────────────────────────────────
+
+
+def pose_sheet(rows=3, cols=3):
+    return sheet_png(rows=rows, cols=cols)
+
+
+def make_pose_job(client, tmp_path, name="fox"):
+    from mascotify.pose import PoseJob, process_pair
+    from mascotify.spec import PoseJobSpec
+
+    d, r = tmp_path / f"{name}-d.png", tmp_path / f"{name}-r.png"
+    d.write_bytes(pose_sheet())
+    r.write_bytes(pose_sheet())
+    job = PoseJob(root=tmp_path, spec=PoseJobSpec(name=name, character=f"a {name}"))
+    return process_pair(d, r, job)
+
+
+def test_the_cast_is_empty_before_any_pose_job(client):
+    assert client.get("/api/cast").json() == []
+
+
+def test_the_cast_lists_exported_pose_jobs(client, tmp_path):
+    assert make_pose_job(client, tmp_path).ok
+    body = client.get("/api/cast").json()
+    assert [c["id"] for c in body] == ["fox"]
+    assert body[0]["alt"] == "a fox", "the description becomes the alt text"
+
+
+def test_a_pose_job_with_no_export_is_not_in_the_cast(client, tmp_path):
+    """A job that failed validation has a directory but nothing to show."""
+    from mascotify.pose import PoseJob
+    from mascotify.spec import PoseJobSpec
+
+    PoseJob(root=tmp_path, spec=PoseJobSpec(name="half")).prepare()
+    assert client.get("/api/cast").json() == []
+
+
+def test_cast_sheets_are_served(client, tmp_path):
+    make_pose_job(client, tmp_path)
+    for which in ("directions", "reactions"):
+        r = client.get(f"/api/cast/fox/{which}")
+        assert r.status_code == 200
+        assert r.headers["content-type"] == "image/webp"
+        assert r.content[:4] == b"RIFF"
+
+
+def test_cast_rejects_a_sheet_that_is_not_one_of_the_two(client, tmp_path):
+    make_pose_job(client, tmp_path)
+    assert client.get("/api/cast/fox/secrets").status_code == 404
+
+
+@pytest.mark.parametrize("name", ["..", "%2e%2e"])
+def test_a_crafted_cast_name_cannot_escape_the_workspace(client, name):
+    assert client.get(f"/api/cast/{name}/directions").status_code in (400, 404, 405)

@@ -338,63 +338,160 @@ $("btn-compare").addEventListener("click", () => {
   reflect();
 })();
 
-/* ── the hero mascot ────────────────────────────────────────
+/* ── the cast ───────────────────────────────────────────────
 
-   A live instance of what `mascotify pose-ingest` exports: the two 3x3 sheets
-   below are the files the pipeline wrote, not a mockup. The cursor's position
-   samples the directions sheet; a click swaps to the reactions sheet.
+   Every character on the masthead is a live instance of what
+   `mascotify pose-ingest` exports: two 3x3 sheets, one sampled by the cursor's
+   angle and one by a click. They are the files the pipeline wrote.
 
-   Kept to `background-position` on a 300% sheet rather than nine <img> tags,
-   which is what makes the swap instant — every pose is already decoded. */
-(() => {
-  const el = document.getElementById("demo-mascot");
-  if (!el) return;
+   Kept to `background-position` on a 300% sheet rather than nine <img> tags per
+   character, which is what lets a dozen of them turn at once — every pose is
+   already decoded, so a turn is one style write and no network. */
+function wireCast() {
+  const nodes = [...document.querySelectorAll("[data-directions]:not([data-wired])")];
+  if (!nodes.length) return;
+  for (const n of nodes) n.dataset.wired = "1";
 
   const REACT_MS = 620;
-  const REACH = 420;               // px at which the gaze is fully committed
+  const REACH = 460;               // px at which the gaze is fully committed
+  const IDLE_AFTER = 2400;         // stillness before they start looking around
+  const BLINK = 4;                 // the half-lidded cell, held briefly
   const fine = matchMedia("(pointer: fine)").matches;
   const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-  const at = (i) => {
-    const col = i % 3, row = (i / 3) | 0;
-    el.style.backgroundPosition = `${col * 50}% ${row * 50}%`;
-  };
+  let lastMove = 0;
+  const jitter = (base, spread) => base + Math.random() * spread;
 
-  let reacting = 0;
-  at(4);
+  function make(el) {
+    const sheets = { dir: el.dataset.directions, rea: el.dataset.reactions };
+    el.style.backgroundImage = `url("${sheets.dir}")`;
+    let cell = 4, reacting = 0;
 
-  // Tracking needs a cursor to track. Saying "move your cursor" on a phone
-  // promises something the next line then switches off.
-  const cap = document.getElementById("demo-cap");
-  if (cap) cap.textContent = fine ? "move your cursor — then poke him" : "tap him";
+    const at = (i) => {
+      cell = i;
+      el.style.backgroundPosition = `${(i % 3) * 50}% ${((i / 3) | 0) * 50}%`;
+    };
+    const sheet = (which) => {
+      el.style.backgroundImage = `url("${sheets[which]}")`;
+    };
+    at(4);
 
-  if (fine) {
-    addEventListener("pointermove", (e) => {
+    const track = (e) => {
       if (reacting) return;
       const b = el.getBoundingClientRect();
-      // A dead zone in the middle band: without it the head twitches between
+      // A dead zone in the middle band: without it a head twitches between
       // neighbouring cells whenever the cursor sits near a boundary.
       const z = (v) => (v < -0.34 ? 0 : v > 0.34 ? 2 : 1);
       const nx = z(Math.max(-1, Math.min(1, (e.clientX - (b.left + b.width / 2)) / REACH)));
       const ny = z(Math.max(-1, Math.min(1, (e.clientY - (b.top + b.height / 2)) / REACH)));
       at(ny * 3 + nx);
+    };
+
+    /* Idle. A character that only moves when moved at is a control, not a
+       cast — it sits dead until the pointer happens to cross it, which on a
+       page you arrived at and have not touched is most of the time. Each one
+       keeps its own jittered timers, so they glance around independently
+       rather than turning in unison like a chorus line. */
+    const wander = () => {
+      if (!reacting && Date.now() - lastMove > IDLE_AFTER) {
+        const pick = [0, 1, 2, 3, 4, 4, 4, 5, 6, 7, 8];
+        at(pick[(Math.random() * pick.length) | 0]);
+      }
+      setTimeout(wander, jitter(1500, 2600));
+    };
+
+    /* Blink. The reactions sheet has no blink of its own — its nine cells are
+       the exported contract — but the half-lidded cell held for a tenth of a
+       second reads as one, and costs no extra art. */
+    const blink = () => {
+      if (!reacting) {
+        const back = cell;
+        sheet("rea");
+        at(BLINK);
+        setTimeout(() => {
+          sheet("dir");
+          at(back);
+        }, 120);
+      }
+      setTimeout(blink, jitter(3400, 5000));
+    };
+
+    el.addEventListener("click", () => {
+      clearTimeout(reacting);
+      sheet("rea");
+      at(Math.floor(Math.random() * 9));
+      if (!still) {
+        el.animate(
+          [{ transform: "scale(1)" }, { transform: "scale(.9, 1.08)" }, { transform: "scale(1)" }],
+          { duration: 340, easing: "cubic-bezier(.34,1.56,.64,1)" },
+        );
+      }
+      reacting = setTimeout(() => {
+        sheet("dir");
+        reacting = 0;
+        lastMove = Date.now();
+        at(4);
+      }, REACT_MS);
+    });
+
+    if (!still) {
+      setTimeout(wander, jitter(IDLE_AFTER, 1200));
+      setTimeout(blink, jitter(1500, 4000));
+    }
+    return { track };
+  }
+
+  const cast = nodes.map(make);
+
+  // One listener for the whole cast rather than one each: a dozen handlers on
+  // pointermove is a dozen layout reads per mouse move.
+  if (fine) {
+    addEventListener("pointermove", (e) => {
+      lastMove = Date.now();
+      for (const m of cast) m.track(e);
     }, { passive: true });
   }
 
-  el.addEventListener("click", () => {
-    clearTimeout(reacting);
-    el.classList.add("reacting");
-    at(Math.floor(Math.random() * 9));
-    if (!still) {
-      el.animate(
-        [{ transform: "scale(1)" }, { transform: "scale(.9, 1.08)" }, { transform: "scale(1)" }],
-        { duration: 340, easing: "cubic-bezier(.34,1.56,.64,1)" },
-      );
+  const cap = document.getElementById("demo-cap");
+  if (cap) cap.textContent = fine ? "move your cursor — then poke one" : "tap one";
+}
+
+// The cast is fetched, so the markup does not exist when this file runs. Wire
+// on the event the loader fires, and once now in case it is ever inlined.
+addEventListener("cast-ready", wireCast);
+wireCast();
+
+/* ── loading the cast ───────────────────────────────────────
+
+   The characters come from the server's own pose jobs, so the masthead fills
+   with the mascots this project made. A fresh project has none, and falls back
+   to the one bundled with the package — a page with one character rather than
+   an empty hole. */
+(async () => {
+  const host = document.getElementById("cast");
+  if (!host) return;
+
+  const BUNDLED = [{ id: "", alt: "A teal and cream robot that watches your cursor",
+                     dir: "/mascot-directions.webp", rea: "/mascot-reactions.webp" }];
+  let list = BUNDLED;
+  try {
+    const found = await (await fetch("/api/cast")).json();
+    if (found.length) {
+      list = found.map((c) => ({
+        ...c, dir: `/api/cast/${c.id}/directions`, rea: `/api/cast/${c.id}/reactions`,
+      }));
     }
-    reacting = setTimeout(() => {
-      el.classList.remove("reacting");
-      reacting = 0;
-      at(4);
-    }, REACT_MS);
-  });
+  } catch { /* the bundled one is a fine page on its own */ }
+
+  host.classList.toggle("solo", list.length === 1);
+  host.innerHTML = list
+    .map(
+      (c, i) => `<figure>
+        <div class="bob" style="animation-delay:${(-i * 0.7).toFixed(2)}s">
+          <div class="demo-mascot" role="img" aria-label="${c.alt.replace(/"/g, "&quot;")}"
+               data-directions="${c.dir}" data-reactions="${c.rea}"></div>
+        </div></figure>`,
+    )
+    .join("");
+  dispatchEvent(new CustomEvent("cast-ready"));
 })();
