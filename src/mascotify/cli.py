@@ -178,13 +178,11 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     if rep.clipped:
         _say(f"{BOLD}clip{RESET}  frames {', '.join(str(i + 1) for i in rep.clipped)}")
 
-    if result.bundle is None or (not rep.ok and not args.force):
+    # No bundle guard here, unlike the pose path: a motion sheet has no cell
+    # whose position carries meaning, so `--force` really can export a loop
+    # whose frames are merely a little uneven.
+    if not rep.ok and not args.force:
         _say(f"\n{RED}validation failed{RESET}")
-        if result.bundle is None and args.force:
-            _say(
-                f"  {DIM}--force cannot bypass a wrong cell count — which cell holds which "
-                f"pose is the contract, not a tolerance{RESET}"
-            )
         for p in rep.problems():
             _say(f"  {RED}!{RESET} {p}")
         _say(f"\n{YELLOW}Regenerate with this follow-up, then ingest again:{RESET}\n")
