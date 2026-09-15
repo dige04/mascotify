@@ -353,7 +353,14 @@ function wireCast() {
   for (const n of nodes) n.dataset.wired = "1";
 
   const REACT_MS = 620;
-  const REACH = 460;               // px at which the gaze is fully committed
+  // How far the cursor has to be before the gaze is fully committed, in
+  // character widths. A fixed pixel reach was tuned against one 300px mascot
+  // and broke as soon as there were six: clustered 140px apart, every offset
+  // that distinguishes them fell inside the dead zone, so the whole row stared
+  // straight ahead at a cursor plainly off to one side. Measuring in the
+  // character's own width keeps a big solo mascot and a small crowd both
+  // committing at the distance that looks right for their size.
+  const REACH = 2.1;
   const IDLE_AFTER = 2400;         // stillness before they start looking around
   const BLINK = 4;                 // the half-lidded cell, held briefly
   const fine = matchMedia("(pointer: fine)").matches;
@@ -382,8 +389,9 @@ function wireCast() {
       // A dead zone in the middle band: without it a head twitches between
       // neighbouring cells whenever the cursor sits near a boundary.
       const z = (v) => (v < -0.34 ? 0 : v > 0.34 ? 2 : 1);
-      const nx = z(Math.max(-1, Math.min(1, (e.clientX - (b.left + b.width / 2)) / REACH)));
-      const ny = z(Math.max(-1, Math.min(1, (e.clientY - (b.top + b.height / 2)) / REACH)));
+      const rx = b.width * REACH, ry = b.height * REACH;
+      const nx = z(Math.max(-1, Math.min(1, (e.clientX - (b.left + b.width / 2)) / rx)));
+      const ny = z(Math.max(-1, Math.min(1, (e.clientY - (b.top + b.height / 2)) / ry)));
       at(ny * 3 + nx);
     };
 
