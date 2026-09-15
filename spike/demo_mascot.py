@@ -18,7 +18,9 @@ the case where aliased curves read as cheap. The palette is the UI's own accent
 and a near-black visor, so the character sits in the page's light rather than
 on top of it.
 """
+import math
 import os
+import sys
 from PIL import Image, ImageDraw
 
 KEY = (0, 255, 0)
@@ -116,12 +118,48 @@ def sheet(cells):
     return img.resize((3 * CELL, 3 * CELL), Image.LANCZOS)
 
 
-# Guarded, so `character()` can be imported to draw other sheets — the wave
-# grid used to exercise the web app is built that way — without importing
-# writing two files as a side effect.
+def wave_sheet(rows: int = 3, cols: int = 4) -> Image.Image:
+    """A motion grid: one arm sweeps, the rest of the body is nailed down.
+
+    The same invariant `sheet_prompt` demands of a generator — only the motion
+    changes between cells — so this validates the way a real generation should
+    and is not a fixture that only passes because it was built to.
+    """
+    n = CELL * SS
+    img = Image.new("RGB", (cols * n, rows * n), KEY)
+    d = ImageDraw.Draw(img)
+    S = SS * 0.66
+    for i in range(rows * cols):
+        r, c = divmod(i, cols)
+        character(d, c * n, r * n, 0, 0, "look")
+        cx, base = c * n + n // 2, r * n + int(n * 0.84)
+        ang = -math.pi / 2 + math.sin(i / (rows * cols) * 2 * math.pi) * 1.15
+        x0, y0 = cx + 74 * S, base - 104 * S
+        x1, y1 = x0 + math.cos(ang) * 60 * S, y0 + math.sin(ang) * 60 * S
+        d.line([x0, y0, x1, y1], fill=CREAM_2, width=int(30 * S))
+        d.ellipse([x1 - 16 * S, y1 - 16 * S, x1 + 16 * S, y1 + 16 * S],
+                  fill=CREAM_2, outline=LINE, width=LW)
+    return img.resize((cols * CELL, rows * CELL), Image.LANCZOS)
+
+
+def anchor() -> Image.Image:
+    """The canonical still every sheet is generated from."""
+    n = CELL * SS
+    a = Image.new("RGB", (n, n), KEY)
+    character(ImageDraw.Draw(a), 0, 0, 0, 0, "look")
+    return a.resize((CELL, CELL), Image.LANCZOS)
+
+
+# Guarded, so `character()` can be imported to draw other sheets without
+# importing writing files as a side effect.
 if __name__ == "__main__":
     OUT = os.environ.get("OUT", "/tmp/art")
     os.makedirs(OUT, exist_ok=True)
-    sheet([(dx, dy, "look") for dx, dy in DIRS]).save(f"{OUT}/directions.png")
-    sheet([(0, 0, k) for k in REACTS]).save(f"{OUT}/reactions.png")
-    print(f"drawn -> {OUT}/directions.png, {OUT}/reactions.png")
+    if "--wave" in sys.argv:
+        wave_sheet().save(f"{OUT}/wave.png")
+        anchor().save(f"{OUT}/ref.png")
+        print(f"drawn -> {OUT}/wave.png, {OUT}/ref.png")
+    else:
+        sheet([(dx, dy, "look") for dx, dy in DIRS]).save(f"{OUT}/directions.png")
+        sheet([(0, 0, k) for k in REACTS]).save(f"{OUT}/reactions.png")
+        print(f"drawn -> {OUT}/directions.png, {OUT}/reactions.png")

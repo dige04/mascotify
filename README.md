@@ -1,5 +1,8 @@
 # mascotify
 
+![An anchor still, the twelve-frame sprite sheet generated from it, and the
+mascot waving — the three stages of one mascotify run](docs/hero.webp)
+
 Turn one character image into production-ready animated mascot assets — sprite
 sheets, animated WebP, Lottie, and bundles for iOS, Android, web, Unity and
 Godot.
@@ -29,8 +32,16 @@ uv tool install 'mascotify[web] @ git+https://github.com/dige04/mascotify.git'
 mascotify serve            # http://127.0.0.1:8765
 ```
 
+![The mascotify web app: a dark single-page tool with a teal robot mascot in
+the masthead that follows the cursor, above the first step of the
+pipeline](docs/webapp.webp)
+
 Describe a mascot, pick a motion, get an animated preview and every platform
 bundle as one download.
+
+The mascot in that masthead is not a mockup. `spike/demo_mascot.py` draws the
+two grids, `pose-ingest` validates and exports them, and the app loads the
+`.webp` files it wrote — the same path any character goes through.
 
 **It needs no key either.** The default provider is `agent`: mascotify shells
 out to the coding agent you already have signed in — Codex, or Gemini CLI — and
@@ -105,6 +116,10 @@ mascotify poses                            # the pose vocabulary, for the cursor
 Not every mascot animates. If what you want is a character that watches the
 pointer and reacts to a click, that is not a loop — it is two 3x3 grids of
 poses, nine head directions and nine expressions, with nothing playing.
+
+![Two 3x3 grids of the same robot: on the left its head and eye turn to each
+of nine compass directions, on the right nine expressions from surprised to
+sleepy to heart-eyed](docs/poses.png)
 
 ```bash
 mascotify pose-plan --ref ref.png --job fox     # prompts for both grids
