@@ -175,9 +175,7 @@ $("btn-animate").addEventListener("click", async () => {
   const fps = Number($("fps").value);
 
   busy(true, document.querySelector(".stage"));
-  $("stats").innerHTML = "";
-  $("snips").innerHTML = "";
-  $("export-row").hidden = true;
+  resetResult();
   unlock("s3", true);
 
   try {
@@ -239,6 +237,21 @@ function renderResult(r) {
   $("export-row").hidden = false;
 }
 
+/** Clear the previous run before starting another.
+
+    The preview image and its caption used to survive a reset, so a run that
+    failed validation showed the *last* successful mascot and its frame count
+    sitting directly above "that sheet did not pass" — the numbers on screen
+    describing a different generation than the error did. */
+function resetResult() {
+  $("stats").innerHTML = "";
+  $("snips").innerHTML = "";
+  $("export-row").hidden = true;
+  $("preview-img").hidden = true;
+  $("preview-empty").hidden = false;
+  $("preview-cap").textContent = "";
+}
+
 const esc = (s) =>
   String(s).replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c],
@@ -252,9 +265,7 @@ $("sheet-upload").addEventListener("change", async (e) => {
   fd.append("file", file);
 
   busy(true, document.querySelector(".stage"));
-  $("stats").innerHTML = "";
-  $("snips").innerHTML = "";
-  $("export-row").hidden = true;
+  resetResult();
   unlock("s3", true);
 
   try {

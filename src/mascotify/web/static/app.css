@@ -300,6 +300,16 @@ h3 { margin: 0 0 var(--s2); font-size: 16px; font-weight: 600; letter-spacing: -
 .row { display: flex; align-items: center; gap: var(--s3); }
 .row.end { justify-content: flex-end; margin-top: var(--s4); }
 .wrap-row { flex-wrap: wrap; }
+
+/* Three buttons in a 360px column wrap 2-then-1 and read as ragged. The
+   download is the point of the step, so it takes the full width and the two
+   inspection actions share the row under it. */
+#export-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s2);
+}
+#export-row .primary { grid-column: 1 / -1; }
 .or { color: var(--ink-3); font-size: 12.5px; }
 
 /* ── controls ───────────────────────────────────────────── */
