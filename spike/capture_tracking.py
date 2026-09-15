@@ -23,11 +23,12 @@ def cmd(m, **p):
 def js(e): return cmd("Runtime.evaluate", expression=e, returnByValue=True).get("result", {}).get("value")
 
 cmd("Emulation.setDeviceMetricsOverride", width=1280, height=900, deviceScaleFactor=2, mobile=False)
-cmd("Page.navigate", url="http://127.0.0.1:8797/"); time.sleep(2.5)
+cmd("Page.navigate", url="http://127.0.0.1:8765/"); time.sleep(2.5)
 
-box = json.loads(js('''(() => { const b = document.getElementById("demo-mascot").getBoundingClientRect();
+# The whole cast, not one character — the point is that they converge.
+box = json.loads(js('''(() => { const b = document.getElementById("cast").getBoundingClientRect();
   return JSON.stringify({x: b.left, y: b.top, w: b.width, h: b.height}); })()'''))
-PAD, FOOT = 70, 116          # FOOT leaves the caption room rather than clipping it
+PAD, FOOT = 34, 76           # FOOT leaves the caption room rather than clipping it
 clip = {"x": box["x"] - PAD, "y": box["y"] - PAD,
         "width": box["w"] + PAD * 2, "height": box["h"] + PAD + FOOT, "scale": 1}
 cx, cy = box["x"] + box["w"] / 2, box["y"] + box["h"] / 2
@@ -37,14 +38,14 @@ def shot():
     return Image.open(io.BytesIO(base64.b64decode(d["data"]))).convert("RGB")
 
 frames, holds = [], []
-STEPS, R = 16, 300
+STEPS, R = 16, 340
 for i in range(STEPS):                       # a full lap, so every cell is used
     a = -math.pi / 2 + 2 * math.pi * i / STEPS
     js(f'dispatchEvent(new PointerEvent("pointermove",{{clientX:{cx + math.cos(a) * R},clientY:{cy + math.sin(a) * R}}}))')
     time.sleep(0.05)
     frames.append(shot()); holds.append(150)
 
-js('document.getElementById("demo-mascot").click()')   # then the poke
+js('document.querySelectorAll(".demo-mascot")[4].click()')   # then poke one of them
 for _ in range(4):
     time.sleep(0.12)
     frames.append(shot()); holds.append(150)
@@ -53,8 +54,8 @@ frames.append(shot()); holds.append(700)
 
 # Captured at 2x for clean edges, shipped at half that — it renders small in a
 # README and the weight is nineteen frames, not one.
-w = 520
+w = 620
 frames = [f.resize((w, round(w * f.height / f.width)), Image.LANCZOS) for f in frames]
-frames[0].save(Path("/tmp/track/tracking.webp"), save_all=True, append_images=frames[1:],
+frames[0].save(Path("/tmp/tracking.webp"), save_all=True, append_images=frames[1:],
                duration=holds, loop=0, quality=82, method=6)
 print("frames:", len(frames), "size:", frames[0].size)

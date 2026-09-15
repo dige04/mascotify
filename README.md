@@ -30,17 +30,24 @@ uv tool install 'mascotify[web] @ git+https://github.com/dige04/mascotify.git'
 mascotify serve            # http://127.0.0.1:8765
 ```
 
-![The mascotify web app: a dark single-page tool with a teal robot mascot in
-the masthead that follows the cursor, above the first step of the
-pipeline](docs/webapp.webp)
+![The mascotify web app: a dark single-page tool with six mascots in the
+masthead — a bear, a black cat, a fox, a frog, a ghost and a robot — all
+watching the cursor, above the first step of the pipeline](docs/webapp.webp)
 
 Describe a mascot, pick a motion, get an animated preview and every platform
 bundle as one download.
 
-The mascot in that masthead is not a mockup, and it is not a still either —
-see it moving [below](#a-mascot-that-follows-the-cursor). `spike/demo_mascot.py`
-draws the two grids, `pose-ingest` validates and exports them, and the app loads
-the `.webp` files it wrote — the same path any character goes through.
+Those six are not a mockup, and not a still either — see them moving
+[below](#a-mascot-that-follows-the-cursor). Each was drawn by a coding agent
+from `anchor_prompt`, turned into two 3x3 grids from that anchor, then keyed,
+normalised and exported by `pose-ingest`. The app reads them from your own
+`.mascotify/poses/`, so the masthead fills up with the characters *you* made; a
+fresh project falls back to the one that ships.
+
+Five of the six needed `--force`: the generator drifted the body 13% to 52%
+sideways across the cells, past the 6% budget. That is the gate working as
+designed rather than a defect — the anchor pass corrects it, and the budget
+exists to say it had to. After correction all six sit within 0.2%.
 
 **It needs no key either.** The default provider is `agent`: mascotify shells
 out to the coding agent you already have signed in — Codex, or Gemini CLI — and
@@ -116,16 +123,16 @@ Not every mascot animates. If what you want is a character that watches the
 pointer and reacts to a click, that is not a loop — it is two 3x3 grids of
 poses, nine head directions and nine expressions, with nothing playing.
 
-![Two 3x3 grids of the same robot: on the left its head and eye turn to each
-of nine compass directions, on the right nine expressions from surprised to
-sleepy to heart-eyed](docs/poses.webp)
+![Two 3x3 grids of the same robot: on the left its eye turns to each of nine
+compass directions, on the right nine expressions from startled to sleepy to
+heart-eyed](docs/poses.webp)
 
-Which together do this — the masthead mascot from the screenshot above,
-answering a cursor walked in a circle around it, then poked:
+Which together do this — the six from the screenshot above, answering a cursor
+walked in a circle around them, then one of them poked:
 
-<img src="docs/tracking.webp" width="300"
-     alt="The robot's eye tracking a cursor around a full circle, then its
-          expression changing when clicked">
+<img src="docs/tracking.webp" width="420"
+     alt="Six mascots turning together to follow a cursor around a full circle,
+          then one changing expression when it is clicked">
 
 ```bash
 mascotify pose-plan --ref ref.png --job fox     # prompts for both grids
