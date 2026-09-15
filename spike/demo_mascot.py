@@ -116,8 +116,12 @@ def sheet(cells):
     return img.resize((3 * CELL, 3 * CELL), Image.LANCZOS)
 
 
-OUT = os.environ.get("OUT", "/tmp/art")
-os.makedirs(OUT, exist_ok=True)
-sheet([(dx, dy, "look") for dx, dy in DIRS]).save(f"{OUT}/directions.png")
-sheet([(0, 0, k) for k in REACTS]).save(f"{OUT}/reactions.png")
-print(f"drawn -> {OUT}/directions.png, {OUT}/reactions.png")
+# Guarded, so `character()` can be imported to draw other sheets — the wave
+# grid used to exercise the web app is built that way — without importing
+# writing two files as a side effect.
+if __name__ == "__main__":
+    OUT = os.environ.get("OUT", "/tmp/art")
+    os.makedirs(OUT, exist_ok=True)
+    sheet([(dx, dy, "look") for dx, dy in DIRS]).save(f"{OUT}/directions.png")
+    sheet([(0, 0, k) for k in REACTS]).save(f"{OUT}/reactions.png")
+    print(f"drawn -> {OUT}/directions.png, {OUT}/reactions.png")

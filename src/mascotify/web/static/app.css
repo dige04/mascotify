@@ -543,7 +543,10 @@ figcaption:empty { display: none; }
 .snip b { display: block; font: 10.5px var(--mono); color: var(--accent); margin-bottom: 6px;
   text-transform: uppercase; letter-spacing: .13em; }
 .snip code.muted { color: var(--ink-3); }
-.snip code { font: 12px/1.55 var(--mono); color: var(--ink-2); word-break: break-all; }
+/* `break-all` splits at whatever character lands on the edge, so a Godot path
+   wrapped as "res://w / ave_frames.tres". `anywhere` takes the existing break
+   opportunities first and only splits a token when it genuinely cannot fit. */
+.snip code { font: 12px/1.55 var(--mono); color: var(--ink-2); overflow-wrap: anywhere; }
 
 .problems {
   border: 1px solid color-mix(in oklab, var(--warn) 42%, var(--line));
