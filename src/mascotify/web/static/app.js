@@ -503,3 +503,18 @@ wireCast();
     .join("");
   dispatchEvent(new CustomEvent("cast-ready"));
 })();
+
+/* ── theme ──────────────────────────────────────────────────
+
+   The attribute is already set by the inline script in <head>; this only
+   handles the click. The choice is remembered, and until one is made the
+   system preference wins. */
+(() => {
+  const btn = document.getElementById("toggle-theme");
+  if (!btn) return;
+  btn.addEventListener("click", () => {
+    const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+    document.documentElement.dataset.theme = next;
+    localStorage.setItem("mascotify-theme", next);
+  });
+})();

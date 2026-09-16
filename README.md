@@ -30,9 +30,14 @@ uv tool install 'mascotify[web] @ git+https://github.com/dige04/mascotify.git'
 mascotify serve            # http://127.0.0.1:8765
 ```
 
-![The mascotify web app: a dark single-page tool with six mascots in the
-masthead — a bear, a black cat, a fox, a frog, a ghost and a robot — all
+![The mascotify web app side by side in its light and dark themes: six mascots
+in the masthead — a bear, a black cat, a fox, a frog, a ghost and a robot — all
 watching the cursor, above the first step of the pipeline](docs/webapp.webp)
+
+It follows your system theme, and the control in the top right overrides it.
+The two are not the same palette inverted: on paper the depth comes from
+shadow and rule weight, so the glow the dark theme lights everything with goes
+out entirely and the accent darkens far enough to be read as text.
 
 Describe a mascot, pick a motion, get an animated preview and every platform
 bundle as one download.

@@ -31,11 +31,76 @@
   --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px;
   --s6: 32px; --s7: 48px; --s8: 72px; --s9: 112px;
 
+  /* Recessed surfaces: fields, stat blocks, snippets — anything that reads as
+     cut into the panel rather than sitting on it. */
+  --sunk:    #06070a;
+  --sunk-2:  #080a0e;
+  --checker: #0d1015;
+  /* Light catching a top edge. On paper there is no such edge, so the light
+     theme sets this to nothing rather than to a paler white. */
+  --lift: rgba(255, 255, 255, .045);
+  --shade-1: 0 1px 2px rgba(0, 0, 0, .5);
+  --shade-2: 0 18px 44px -24px rgba(0, 0, 0, .9);
+  --shade-3: 0 40px 90px -30px rgba(0, 0, 0, .95);
+  --shade-4: 0 20px 50px -18px rgba(0, 0, 0, .9);
+  --cast-shadow: 0 12px 16px rgba(0, 0, 0, .55);
+  --vignette: rgba(0, 0, 0, .65);
+  /* What a character stands on. Light from below in the dark theme; on paper
+     there is no light from below, so the light theme makes it a shadow. */
+  --pool:    color-mix(in oklab, var(--accent) 16%, transparent);
+  --pool-hi: color-mix(in oklab, var(--accent) 30%, transparent);
+  --floor:   color-mix(in oklab, var(--accent) 26%, transparent);
+  --mark-glow: 0 0 16px color-mix(in oklab, var(--accent) 70%, transparent);
+  --zero-glow: 0 0 22px color-mix(in oklab, var(--accent) 55%, transparent);
+  --grain: .22;
+  --tint: 13%;      /* how hard the page's light source burns */
+  --tint-2: 7%;
+
   --glow: 0 0 0 1px color-mix(in oklab, var(--accent) 22%, transparent),
           0 0 28px color-mix(in oklab, var(--accent) 22%, transparent);
 
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
   --sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+}
+
+:root[data-theme="light"] {
+  --bg:      #faf9f6;
+  --bg-2:    #f5f3ef;
+  --panel:   #ffffff;
+  --panel-2: #f4f2ed;
+  --line:    #e7e3db;
+  --line-2:  #d8d3c9;
+  --ink:     #16181c;
+  --ink-2:   #545a63;
+  --ink-3:   #6a707a;   /* 4.74:1 on paper — the smallest type on the page */
+  --accent:  #0b7d66;
+  --accent-2:#075c4b;
+  --accent-ink: #ffffff;
+  --warn:    #9a6404;
+  --bad:     #b03c28;
+
+  --sunk:    #f3f1ec;
+  --sunk-2:  #eeece6;
+  --checker: #e9e6de;
+  --lift: transparent;
+  --shade-1: 0 1px 2px rgba(20, 22, 28, .05);
+  --shade-2: 0 14px 30px -20px rgba(20, 22, 28, .30);
+  --shade-3: 0 30px 70px -28px rgba(20, 22, 28, .35);
+  --shade-4: 0 16px 40px -16px rgba(20, 22, 28, .26);
+  --cast-shadow: 0 10px 14px rgba(20, 22, 28, .16);
+  --vignette: rgba(20, 22, 28, .05);
+  --pool:    rgba(20, 22, 28, .055);
+  --pool-hi: rgba(20, 22, 28, .10);
+  --floor:   color-mix(in oklab, var(--accent) 10%, transparent);
+  --mark-glow: none;
+  --zero-glow: none;
+  --grain: .05;
+  --tint: 8%;
+  --tint-2: 4%;
+
+  /* A ring rather than a halo. A blurred accent on paper reads as a smudge. */
+  --glow: 0 0 0 1px color-mix(in oklab, var(--accent) 45%, transparent),
+          0 2px 10px -2px color-mix(in oklab, var(--accent) 28%, transparent);
 }
 
 * { box-sizing: border-box; }
@@ -63,13 +128,13 @@ body::before {
   content: ""; position: fixed; inset: 0; z-index: -2; pointer-events: none;
   background:
     radial-gradient(900px 520px at 50% -8%,
-      color-mix(in oklab, var(--accent) 13%, transparent), transparent 70%),
+      color-mix(in oklab, var(--accent) var(--tint), transparent), transparent 70%),
     radial-gradient(700px 400px at 88% 8%,
-      color-mix(in oklab, #4f7cff 7%, transparent), transparent 70%);
+      color-mix(in oklab, #4f7cff var(--tint-2), transparent), transparent 70%);
 }
 body::after {
   content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
-  opacity: .22;
+  opacity: var(--grain);
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='.5'/%3E%3C/svg%3E");
 }
 
@@ -92,7 +157,7 @@ body::after {
   width: 9px; height: 9px; border-radius: 3px;
   background: var(--accent);
   align-self: center;
-  box-shadow: 0 0 16px color-mix(in oklab, var(--accent) 70%, transparent);
+  box-shadow: var(--mark-glow);
   animation: pulse 3.6s ease-in-out infinite;
 }
 @keyframes pulse { 50% { opacity: .55; } }
@@ -112,12 +177,23 @@ body::after {
 }
 .chip:hover { border-color: var(--accent-2); color: var(--ink); box-shadow: var(--glow); }
 
+.bar-right { display: flex; align-items: center; gap: var(--s2); }
+
+.chip.icon { padding: 6px 9px; }
+/* A half-filled disc: the sun/moon pair says "day or night", which is not the
+   choice being made — the page is the same page either way. */
+#theme-mark {
+  display: block; width: 13px; height: 13px;
+  border: 1.5px solid currentColor; border-radius: 50%;
+  background: linear-gradient(90deg, currentColor 50%, transparent 50%);
+}
+
 .dot {
   width: 7px; height: 7px; border-radius: 50%;
   background: var(--bad);
   transition: background .2s, box-shadow .2s;
 }
-.dot.ready { background: var(--accent); box-shadow: 0 0 10px var(--accent); }
+.dot.ready { background: var(--accent); box-shadow: var(--mark-glow); }
 
 /* ── masthead ───────────────────────────────────────────── */
 
@@ -171,10 +247,7 @@ h1 em { font-style: italic; color: var(--accent); }
   font-size: 30px; font-weight: 600; letter-spacing: -0.04em;
   font-variant-numeric: tabular-nums;
 }
-.facts dd.zero {
-  color: var(--accent);
-  text-shadow: 0 0 22px color-mix(in oklab, var(--accent) 55%, transparent);
-}
+.facts dd.zero { color: var(--accent); text-shadow: var(--zero-glow); }
 
 /* The cast. A single character that only reacts when the pointer happens to
    cross it reads as a widget; six of them turning together reads as the page
@@ -196,13 +269,11 @@ h1 em { font-style: italic; color: var(--accent); }
   aspect-ratio: 1;
   display: grid; place-items: center;
   border-radius: 16px;
-  background: radial-gradient(56% 50% at 50% 62%,
-    color-mix(in oklab, var(--accent) 16%, transparent), transparent 72%);
+  background: radial-gradient(56% 50% at 50% 62%, var(--pool), transparent 72%);
   transition: background .25s;
 }
 .cast figure:hover {
-  background: radial-gradient(60% 54% at 50% 62%,
-    color-mix(in oklab, var(--accent) 30%, transparent), transparent 74%);
+  background: radial-gradient(60% 54% at 50% 62%, var(--pool-hi), transparent 74%);
 }
 
 /* The bob sits on a wrapper so it cannot fight the squash the click animates
@@ -222,7 +293,7 @@ h1 em { font-style: italic; color: var(--accent); }
   cursor: pointer;
   /* The pose swap is a cut, not a tween — halfway between two head angles is
      not a pose this character has. Only the shadow under it eases. */
-  filter: drop-shadow(0 12px 16px rgba(0, 0, 0, .55));
+  filter: drop-shadow(var(--cast-shadow));
   transition: filter .25s;
 }
 .demo-mascot:hover {
@@ -239,7 +310,7 @@ h1 em { font-style: italic; color: var(--accent); }
 .live {
   width: 6px; height: 6px; border-radius: 50%;
   background: var(--accent);
-  box-shadow: 0 0 9px var(--accent);
+  box-shadow: var(--mark-glow);
   animation: pulse 2.4s ease-in-out infinite;
 }
 
@@ -273,9 +344,9 @@ h1 em { font-style: italic; color: var(--accent); }
   border-radius: var(--r-lg);
   padding: var(--s6);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, .045),
-    0 1px 2px rgba(0, 0, 0, .5),
-    0 18px 44px -24px rgba(0, 0, 0, .9);
+    inset 0 1px 0 var(--lift),
+    var(--shade-1),
+    var(--shade-2);
   transition: opacity .3s, border-color .3s;
 }
 
@@ -358,7 +429,7 @@ textarea, input[type=text], input[type=password], select {
   text-transform: none;
   letter-spacing: -0.011em;
   color: var(--ink);
-  background: #06070a;
+  background: var(--sunk);
   border: 1px solid var(--line-2);
   border-radius: var(--r);
   outline: none;
@@ -369,7 +440,7 @@ textarea::placeholder { color: var(--ink-3); }
 
 textarea:focus, input:focus, select:focus {
   border-color: var(--accent);
-  background: #080a0e;
+  background: var(--sunk-2);
   box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 15%, transparent),
               0 0 24px -6px color-mix(in oklab, var(--accent) 45%, transparent);
 }
@@ -476,16 +547,15 @@ button:active { transform: translateY(1px); }
   border-radius: 14px;
   border: 1px solid var(--line-2);
   overflow: hidden;
-  background-color: #06070a;
+  background-color: var(--sunk);
   background-image:
-    radial-gradient(72% 56% at 50% 106%,
-      color-mix(in oklab, var(--accent) 26%, transparent), transparent 74%),
-    linear-gradient(45deg, #0d1015 25%, transparent 25%, transparent 75%, #0d1015 75%),
-    linear-gradient(45deg, #0d1015 25%, transparent 25%, transparent 75%, #0d1015 75%);
+    radial-gradient(72% 56% at 50% 106%, var(--floor), transparent 74%),
+    linear-gradient(45deg, var(--checker) 25%, transparent 25%, transparent 75%, var(--checker) 75%),
+    linear-gradient(45deg, var(--checker) 25%, transparent 25%, transparent 75%, var(--checker) 75%);
   background-size: 100% 100%, 20px 20px, 20px 20px;
   background-position: 0 0, 0 0, 10px 10px;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.04),
-              inset 0 0 70px rgba(0,0,0,.65);
+  box-shadow: inset 0 1px 0 var(--lift),
+              inset 0 0 70px var(--vignette);
 }
 .canvas img { max-width: 86%; max-height: 86%; object-fit: contain; }
 .canvas.stage { aspect-ratio: 16/11; }
@@ -540,7 +610,7 @@ figcaption:empty { display: none; }
   margin: 0;
   display: grid; grid-template-columns: auto 1fr; gap: 9px var(--s4);
   padding: var(--s4);
-  background: #06070a;
+  background: var(--sunk);
   border: 1px solid var(--line);
   border-radius: var(--r);
 }
@@ -560,7 +630,7 @@ figcaption:empty { display: none; }
 .snips { display: flex; flex-direction: column; gap: var(--s2); }
 
 .snip {
-  background: #06070a;
+  background: var(--sunk);
   border: 1px solid var(--line);
   border-radius: var(--r);
   padding: 11px 13px;
@@ -592,7 +662,7 @@ dialog {
   color: var(--ink);
   padding: 0;
   max-width: 440px; width: calc(100% - 32px);
-  box-shadow: 0 40px 90px -30px rgba(0,0,0,.95);
+  box-shadow: var(--shade-3);
 }
 dialog::backdrop { background: rgba(2,3,5,.72); backdrop-filter: blur(4px); }
 .sheet { padding: var(--s6); display: flex; flex-direction: column; gap: var(--s3); }
@@ -605,7 +675,7 @@ dialog::backdrop { background: rgba(2,3,5,.72); backdrop-filter: blur(4px); }
   background: var(--panel-2);
   border: 1px solid var(--line-2);
   border-radius: var(--r);
-  box-shadow: 0 20px 50px -18px rgba(0,0,0,.9);
+  box-shadow: var(--shade-4);
   opacity: 0; pointer-events: none;
   transition: opacity .2s, transform .2s;
   max-width: min(560px, calc(100% - 32px));
