@@ -377,9 +377,10 @@ function wireCast() {
 
   function make(el) {
     const sheets = { dir: el.dataset.directions, rea: el.dataset.reactions };
-    // Which reactions cell is half-lidded. Told by the server, because the
-    // order of that sheet is free and an index hardcoded here would silently
-    // become the wrong expression the day it changes.
+    // Which reactions cell to borrow for a blink. Told by the server rather
+    // than hardcoded, since that sheet's cell order is free — though the
+    // larger uncertainty is what the model actually drew there, which no
+    // index can protect against. See BLINK_POSE.
     const blinkCell = Number(el.dataset.blink ?? 4);
     el.style.backgroundImage = `url("${sheets.dir}")`;
     let cell = 4, reacting = 0;
@@ -419,8 +420,10 @@ function wireCast() {
     };
 
     /* Blink. The reactions sheet has no blink of its own — its nine cells are
-       the exported contract — but the half-lidded cell held for a tenth of a
-       second reads as one, and costs no extra art. */
+       the exported contract — so an idle character borrows the half-lidded one
+       for 120ms. Cheap, and close enough for a character this size; it is not
+       a real blink, and on art where that pose came back carrying Zzz it reads
+       as a flicker rather than an eyelid. */
     let blinking = 0;
     const blink = () => {
       if (!reacting) {

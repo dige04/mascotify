@@ -169,9 +169,14 @@ REACTIONS: dict[str, str] = {
 
 POSE_SETS = ("directions", "reactions")
 
-# The half-lidded pose. Held for a tenth of a second it reads as a blink, which
-# is why an idle character borrows it rather than needing a tenth expression.
-# Named rather than indexed because the order above is free.
+# Which expression an idle character borrows for a blink, rather than needing a
+# tenth. Named rather than indexed because the order above is free — but that
+# only fixes half the problem, and the smaller half. The real bet is on what the
+# image model drew in that cell, which nothing here can check: ask for "sleepy"
+# and you may get closed eyes, or a yawn, or closed eyes with Zzz floating
+# beside them, and a Zzz that flashes in and out over 120ms reads as a glitch
+# rather than a blink. Same division of labour as cell order on the directions
+# grid — look at the sheet.
 BLINK_POSE = "sleepy"
 
 
