@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -22,6 +23,53 @@ from .imaging.pack import Atlas, pack, write_animation
 from .spec import JobSpec
 
 WORKSPACE = ".mascotify"
+
+# What survives into a directory name. Not a blocklist of the dangerous
+# characters — a blocklist is a guess about which ones matter, and it has to be
+# right on every platform.
+UNSAFE = re.compile(r"[^a-z0-9-]+")
+MAX_NAME = 48
+
+
+def job_name(action: str) -> str:
+    """Turn free-form action text into a directory name.
+
+    The action arrives from a query string and is used as a path under the
+    workspace, so it is attacker-controlled input addressing the filesystem.
+    Keeping the last path component is what makes `../../outside` land on
+    `outside` *inside* the workspace rather than two levels above it, and
+    slugging what is left means no separator, dot or control character can
+    survive to mean something to a filesystem later.
+    """
+    last = re.split(r"[\\/]", str(action))[-1]
+    return UNSAFE.sub("-", last.strip().lower()).strip("-")[:MAX_NAME].strip("-") or "mascot"
+
+
+def validate_job_name(job: str) -> str:
+    """Refuse a name that addresses anything but a job directory.
+
+    Deliberately not `job_name` — that one repairs, and repairing here would be
+    a bug with teeth: a delete endpoint handed `..` would quietly rewrite it to
+    a valid name and remove a real job instead of the caller's mistake. A name
+    is acceptable only if it is already exactly what `job_name` would produce,
+    so the two can never disagree about what is addressable.
+    """
+    if not job or job != job_name(job):
+        raise ValueError(f"{job!r} is not a job name")
+    return job
+
+
+def asset_name(job: str) -> str:
+    """A job name safe to embed in a quoted filename in a response header.
+
+    Kept separate from `job_name` even though the alphabet currently coincides,
+    because the two guard different things. A directory name has to be
+    addressable; a `Content-Disposition` value has to not end the quoted string
+    or the header — one `"` or CRLF in a name that arrived from a URL path is
+    header injection. Collapsing them would mean a later change to what a
+    directory may contain silently reopens that.
+    """
+    return job_name(job)
 
 
 def sha(data: bytes | Path, length: int = 12) -> str:
@@ -144,6 +192,19 @@ def process(
     job.frames_dir.mkdir(parents=True, exist_ok=True)
     for i, f in enumerate(loop):
         f.save(job.frames_dir / f"{i:03d}.png")
+
+    # Clear each target before rewriting it. Exports are per-frame on some
+    # targets — iOS writes one .imageset per frame — so re-running a job at a
+    # lower frame count used to leave the old frames behind, and the bundle
+    # shipped twelve images for a two-frame loop.
+    #
+    # Per target rather than the whole directory, because `--targets` lets the
+    # caller export a subset: wiping everything would delete a bundle they did
+    # not ask to rebuild and never mentioned wanting gone.
+    for t in targets:
+        stale = job.out_dir / t
+        if stale.exists():
+            shutil.rmtree(stale)
 
     atlas = pack(loop, fps=spec.sheet.fps)
     preview = write_animation(loop, job.dir / "preview.webp", fps=spec.sheet.fps)

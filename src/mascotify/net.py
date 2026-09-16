@@ -147,6 +147,30 @@ def send(
     ) from last
 
 
+def submit(
+    call: Callable[[], Any],
+    *,
+    provider: str,
+    model: str,
+    redact: Redactor,
+) -> Any:
+    """Send the request that starts a billed job — exactly once.
+
+    The asymmetry with `send` is the whole point, and it is about money rather
+    than politeness. A 502 on a *poll* means the status read failed; the job is
+    untouched and asking again costs nothing, so `send` retries. A 502 on the
+    submit means something entirely different: the request may well have
+    arrived, started a generation and billed for it, and the failure is only in
+    the reply coming back. Retrying that is how one click becomes two charges.
+
+    So the ambiguous case resolves against spending the user's money. The cost
+    is that a genuinely transient submit failure surfaces as an error the
+    caller has to repeat by hand, which is the right way round — they can see
+    their own dashboard, and this code cannot.
+    """
+    return send(call, provider=provider, model=model, redact=redact, attempts=1)
+
+
 def json_of(resp: Any, provider: str, redact: Redactor) -> dict:
     """Decode a JSON body, saying so when it is not JSON.
 
@@ -206,6 +230,8 @@ def download(
     timeout: float,
     max_bytes: int | None = None,
     accept: tuple[str, ...] = IMAGE_TYPES,
+    attempts: int = MAX_ATTEMPTS,
+    sleep: Callable[[float], None] | None = None,
 ) -> bytes:
     """Fetch a result asset into memory, refusing anything that is not one.
 
@@ -213,6 +239,11 @@ def download(
     the failure surfaces much later as an unreadable image.
     """
     chunks: list[bytes] = []
+
+    def sink():
+        chunks.clear()  # a retry restarts the body; do not append to the last one
+        return chunks.append
+
     _stream(
         client,
         url,
@@ -221,7 +252,9 @@ def download(
         timeout=timeout,
         max_bytes=max_bytes,
         accept=accept,
-        write=chunks.append,
+        sink=sink,
+        attempts=attempts,
+        sleep=sleep,
     )
     return b"".join(chunks)
 
@@ -236,6 +269,8 @@ def download_to(
     timeout: float,
     max_bytes: int | None = None,
     accept: tuple[str, ...] = VIDEO_TYPES,
+    attempts: int = MAX_ATTEMPTS,
+    sleep: Callable[[float], None] | None = None,
 ) -> Path:
     """Stream a result asset to disk under the same guards.
 
@@ -245,7 +280,15 @@ def download_to(
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_suffix(dest.suffix + ".part")
     try:
-        with tmp.open("wb") as fh:
+        with tmp.open("w+b") as fh:
+
+            def sink():
+                # Rewind before each attempt, so a 502 that arrives with an
+                # error-page body cannot end up prefixed to the clip.
+                fh.seek(0)
+                fh.truncate()
+                return fh.write
+
             _stream(
                 client,
                 url,
@@ -254,7 +297,9 @@ def download_to(
                 timeout=timeout,
                 max_bytes=max_bytes,
                 accept=accept,
-                write=fh.write,
+                sink=sink,
+                attempts=attempts,
+                sleep=sleep,
             )
         # Rename only once the whole body arrived, so a truncated download can
         # never be mistaken for a finished clip on a later run.
@@ -273,36 +318,70 @@ def _stream(
     timeout: float,
     max_bytes: int | None,
     accept: tuple[str, ...],
-    write: Any,
+    sink: Callable[[], Any],
+    attempts: int = MAX_ATTEMPTS,
+    sleep: Callable[[float], None] | None = None,
 ) -> int:
-    """Shared guards for both download shapes."""
+    """Shared guards for both download shapes, with the same retry as `send`.
+
+    A result URL is a plain GET of an asset that already exists and is already
+    paid for, so it is safe to ask again — the opposite of `submit`. Retrying
+    here matters because the asset is fetched from a CDN rather than the API,
+    and losing a finished generation to one 502 on the last hop is the most
+    expensive way to fail.
+
+    `sink` is a factory rather than a writer: it is called once per attempt and
+    resets the destination, because a retry replays the body from the start.
+    """
+    import httpx
+
     # Read the cap at call time. As a default argument it would freeze at import
     # and quietly ignore any later override — the same binding trap that made
     # patching `sleep` a no-op.
     max_bytes = MAX_DOWNLOAD_BYTES if max_bytes is None else max_bytes
+    sleep = sleep or time.sleep
+    last: Exception | None = None
 
-    with client.stream("GET", url, timeout=timeout, follow_redirects=True) as r:
-        if r.status_code >= 400:
-            raise HttpError(f"{provider} result URL returned {r.status_code}")
+    for attempt in range(attempts):
+        write = sink()
+        try:
+            with client.stream("GET", url, timeout=timeout, follow_redirects=True) as r:
+                if r.status_code in RETRY_STATUS and attempt < attempts - 1:
+                    sleep(backoff_delay(attempt, r.headers.get("Retry-After")))
+                    continue
+                if r.status_code >= 400:
+                    raise HttpError(f"{provider} result URL returned {r.status_code}")
 
-        ctype = (r.headers.get("Content-Type") or "").split(";")[0].strip()
-        if ctype and not any(ctype.startswith(a) for a in accept):
-            raise HttpError(
-                f"{provider} result URL served {ctype!r} rather than {' or '.join(accept)}"
-            )
+                ctype = (r.headers.get("Content-Type") or "").split(";")[0].strip()
+                if ctype and not any(ctype.startswith(a) for a in accept):
+                    raise HttpError(
+                        f"{provider} result URL served {ctype!r} rather than "
+                        f"{' or '.join(accept)}"
+                    )
 
-        total = 0
-        for chunk in r.iter_bytes():
-            total += len(chunk)
-            if total > max_bytes:
-                raise HttpError(
-                    f"{provider} result exceeded {max_bytes // 1024 // 1024}MB; refusing it"
-                )
-            write(chunk)
+                total = 0
+                for chunk in r.iter_bytes():
+                    total += len(chunk)
+                    if total > max_bytes:
+                        raise HttpError(
+                            f"{provider} result exceeded {max_bytes // 1024 // 1024}MB; "
+                            "refusing it"
+                        )
+                    write(chunk)
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            last = exc
+            if attempt == attempts - 1:
+                break
+            sleep(backoff_delay(attempt))
+            continue
 
-    if not total:
-        raise HttpError(f"{provider} result URL returned an empty body")
-    return total
+        if not total:
+            raise HttpError(f"{provider} result URL returned an empty body")
+        return total
+
+    raise HttpError(
+        f"{provider} result URL unreachable after {attempts} attempts: {redact(str(last))}"
+    ) from last
 
 
 def headers(extra: dict[str, str] | None = None) -> dict[str, str]:

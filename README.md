@@ -1,17 +1,20 @@
 # mascotify
 
-Turn one character image into production-ready animated mascot assets — sprite
-sheets, animated WebP, Lottie, and bundles for iOS, Android, web, Unity and
-Godot.
+![An anchor still, the twelve-frame sprite sheet generated from it, and the
+mascot waving — the three stages of one mascotify run](docs/hero.webp)
+
+Turn one character image into production-ready mascot assets — sprite sheets,
+animated WebP, Lottie, and bundles for iOS, Android, web, Unity and Godot. Or
+into a character that watches the cursor and blinks when you poke it.
 
 **No API key on the CLI path.** Your coding agent is the image provider:
 mascotify compiles the prompt, the agent's own image tool draws it, mascotify
 measures the result and exports it. Codex's built-in `image_gen`, or any agent
 that can generate an image, is enough.
 
-The web app is the exception — a browser has no agent to draw with, so
-`mascotify serve` wants a provider key unless you feed it a sheet you already
-generated.
+A browser has no agent of its own, so the web app shells out to the one you are
+already signed in to. Still no key — just slower, because a turn through an
+agent takes a minute where an API call takes seconds.
 
 ```bash
 uv tool install git+https://github.com/dige04/mascotify.git
@@ -20,8 +23,6 @@ mascotify install-skill          # teach your agent to drive it
 
 Then, in your agent: *"make me a waving robot mascot for this app."*
 
-Prefer a UI? `mascotify serve` runs a local web app on the same pipeline.
-
 ## The web app
 
 ```bash
@@ -29,8 +30,29 @@ uv tool install 'mascotify[web] @ git+https://github.com/dige04/mascotify.git'
 mascotify serve            # http://127.0.0.1:8765
 ```
 
+![The mascotify web app side by side in its light and dark themes: six mascots
+in the masthead — a bear, a black cat, a fox, a frog, a ghost and a robot — all
+watching the cursor, above the first step of the pipeline](docs/webapp.webp)
+
+It follows your system theme, and the control in the top right overrides it.
+The two are not the same palette inverted: on paper the depth comes from
+shadow and rule weight, so the glow the dark theme lights everything with goes
+out entirely and the accent darkens far enough to be read as text.
+
 Describe a mascot, pick a motion, get an animated preview and every platform
 bundle as one download.
+
+Those six are not a mockup, and not a still either — see them moving
+[below](#a-mascot-that-follows-the-cursor). Each was drawn by a coding agent
+from `anchor_prompt`, turned into two 3x3 grids from that anchor, then keyed,
+normalised and exported by `pose-ingest`. The app reads them from your own
+`.mascotify/poses/`, so the masthead fills up with the characters *you* made; a
+fresh project falls back to the one that ships.
+
+Five of the six needed `--force`: the generator drifted the body 13% to 52%
+sideways across the cells, past the 6% budget. That is the gate working as
+designed rather than a defect — the anchor pass corrects it, and the budget
+exists to say it had to. After correction all six sit within 0.2%.
 
 **It needs no key either.** The default provider is `agent`: mascotify shells
 out to the coding agent you already have signed in — Codex, or Gemini CLI — and
@@ -97,7 +119,56 @@ mascotify motions                          # wave idle bounce nod blink point ty
 mascotify doctor sheet.png                 # measure without exporting, JSON out
 mascotify compare --ref ref.png --against sheet.png   # size-matched identity strip
 mascotify plan --rows 4 --cols 6 --fps 24  # 24 frames, still no key needed
+mascotify poses                            # the pose vocabulary, for the cursor-tracker
 ```
+
+## A mascot that follows the cursor
+
+Not every mascot animates. If what you want is a character that watches the
+pointer and reacts to a click, that is not a loop — it is two 3x3 grids of
+poses, nine head directions and nine expressions, with nothing playing.
+
+![Two 3x3 grids of the same robot: on the left its eye turns to each of nine
+compass directions, on the right nine expressions from startled to sleepy to
+heart-eyed](docs/poses.webp)
+
+Which together do this — the six from the screenshot above, answering a cursor
+walked in a circle around them, then one of them poked:
+
+<img src="docs/tracking.webp" width="420"
+     alt="Six mascots turning together to follow a cursor around a full circle,
+          then one changing expression when it is clicked">
+
+```bash
+mascotify pose-plan --ref ref.png --job fox     # prompts for both grids
+mascotify pose-ingest --job fox \
+  --directions .mascotify/poses/fox/directions.png \
+  --reactions  .mascotify/poses/fox/reactions.png
+```
+
+The export is two lossless `.webp` sheets and the JSX, for
+[page-mascot](https://github.com/nilbuild/page-mascot) — an npm component that
+does the rendering. Lossless because the component samples cells with
+`background-position`, and a lossy edge shows up at runtime as a sliver of the
+neighbouring pose down the side of the mascot.
+
+Both sheets are ingested in one call and normalised as eighteen frames on one
+canvas. Separately they would land on two canvases and two baselines, and the
+character would jump every time you poked it.
+
+The measurement that matters here is different from the animation path's. A
+turned head widens the character's bounding box, so centring each cell on its
+own box slides the body *away* from the side the head turned towards — a mascot
+that leans away from the cursor following it. So placement is measured from the
+feet up, against the cell the character was drawn in, before anything is
+normalised: that tells a head that turns apart from a body that walks around,
+which a bounding box cannot. It is also the only way to catch the two sheets
+seating the body in different places, which is invisible until the first click.
+
+One thing it cannot check is cell order. Nine plausible head turns in the wrong
+cells measure perfectly and track the cursor backwards, so `pose-plan` tells the
+agent to look at the sheet and confirm — the same division of labour as the rest
+of the tool.
 
 ## Does the agent loop actually work?
 
@@ -256,3 +327,10 @@ packaged web assets, so source-tree-only successes do not hide release defects.
 open-source, local-first alternative to. Its public API shape informed the
 pipeline design — the anchor step and grid detection in particular are ideas
 worth borrowing.
+
+[page-mascot](https://github.com/nilbuild/page-mascot) solves a different
+problem well: one specific, finished thing — a cursor-following character for a
+web page — that you can install and use without generating anything, from a
+gallery of characters someone already drew. mascotify does not compete with
+that; it generates assets, and `pose-ingest` writes them in the format that
+component reads.

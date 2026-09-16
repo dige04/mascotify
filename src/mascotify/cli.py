@@ -16,11 +16,22 @@ from pathlib import Path
 
 from PIL import Image
 
-from . import __version__, pipeline
+from . import __version__, pipeline, pose
 from .export.targets import TARGETS
 from .gen import prompts
 from .pipeline import Job
-from .spec import MOTIONS, CutoutSpec, JobSpec, MotionSpec, SheetSpec
+from .pose import PoseJob
+from .spec import (
+    DIRECTIONS,
+    MOTIONS,
+    REACTIONS,
+    CutoutSpec,
+    JobSpec,
+    MotionSpec,
+    PoseJobSpec,
+    PoseSpec,
+    SheetSpec,
+)
 
 BOLD, DIM, RED, GREEN, YELLOW, RESET = (
     ("\033[1m", "\033[2m", "\033[31m", "\033[32m", "\033[33m", "\033[0m")
@@ -167,6 +178,9 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     if rep.clipped:
         _say(f"{BOLD}clip{RESET}  frames {', '.join(str(i + 1) for i in rep.clipped)}")
 
+    # No bundle guard here, unlike the pose path: a motion sheet has no cell
+    # whose position carries meaning, so `--force` really can export a loop
+    # whose frames are merely a little uneven.
     if not rep.ok and not args.force:
         _say(f"\n{RED}validation failed{RESET}")
         for p in rep.problems():
@@ -284,6 +298,173 @@ def cmd_serve(args: argparse.Namespace) -> int:
         threading.Timer(0.8, lambda: webbrowser.open(url)).start()
 
     uvicorn.run(create_app(root), host=args.host, port=args.port, log_level="warning")
+    return 0
+
+
+def cmd_poses(args: argparse.Namespace) -> int:
+    """List the pose vocabulary a cursor-tracking mascot is built from."""
+    if args.json:
+        print(json.dumps({"directions": dict(DIRECTIONS), "reactions": REACTIONS}, indent=2))
+        return 0
+    _say(f"{BOLD}directions{RESET} {DIM}— read by compass position; this order is the contract{RESET}")
+    for i, (key, desc) in enumerate(DIRECTIONS):
+        _say(f"  {DIM}cell {i + 1}{RESET}  {key:<11} {desc}")
+    _say(f"\n{BOLD}reactions{RESET} {DIM}— one is shown on a click; order does not matter{RESET}")
+    for key, desc in REACTIONS.items():
+        _say(f"  {key:<11} {desc}")
+    return 0
+
+
+def _pose_spec_from(args: argparse.Namespace) -> PoseJobSpec:
+    return PoseJobSpec(
+        name=args.job or "mascot",
+        character=args.describe or "",
+        pose=PoseSpec(base_px=args.size),
+        cutout=CutoutSpec(
+            method=args.cutout,
+            key_color=args.key_color,
+            auto_key="none" if args.no_auto_key else "corners",
+        ),
+    )
+
+
+def cmd_pose_plan(args: argparse.Namespace) -> int:
+    """Create a pose job and emit the prompts for both grids."""
+    root = Path(args.root).resolve()
+    spec = _pose_spec_from(args)
+
+    ref = Path(args.ref).resolve()
+    if not ref.exists():
+        _say(f"{RED}reference image not found: {ref}{RESET}")
+        return 1
+    spec.anchor_sha = pipeline.sha(ref)
+
+    job = PoseJob(root=root, spec=spec)
+    job.prepare()
+
+    texts = {
+        "directions": prompts.directions_prompt(spec),
+        "reactions": prompts.reactions_prompt(spec),
+    }
+    for which, text in texts.items():
+        (job.dir / f"{which}-prompt.txt").write_text(text + "\n", encoding="utf-8")
+
+    if args.prompt_only:
+        for which, text in texts.items():
+            print(f"--- {which} ---\n{text}\n")
+        return 0
+
+    size = f"{spec.pose.cols * args.cell}x{spec.pose.rows * args.cell}"
+    ingest = (
+        f"mascotify pose-ingest --directions {job.sheet_path('directions')}"
+        f" --reactions {job.sheet_path('reactions')}"
+    )
+
+    _say(f"{DIM}reference: {args.ref} (sha {spec.anchor_sha}){RESET}")
+    _say(f"{DIM}job: {job.dir}{RESET}\n")
+
+    # Both prompts go out together because both sheets are ingested together —
+    # they are normalised as one set, so there is no half-finished state worth
+    # stopping at, and a reader who runs only the first gets nothing.
+    for n, (which, text) in enumerate(texts.items(), start=1):
+        print(
+            prompts.agent_brief(
+                str(job.sheet_path(which)),
+                text,
+                size,
+                next_command=(
+                    f"# sheet {n} of 2 — generate the other one too, then run:\n  {ingest}"
+                    if n == 1
+                    else ingest
+                ),
+                next_note=(
+                    "Look at the sheet before moving on. The cell order carries the meaning "
+                    "here:\ncell 5 must be the resting pose and the head must actually turn "
+                    "towards the\ncorner its cell sits in. Nothing downstream can check that "
+                    "— a grid with the\nnine directions shuffled validates perfectly and "
+                    "tracks the cursor wrong."
+                    if which == "directions"
+                    else "That normalises both sheets together and exports the component "
+                    "bundle.\nIf it reports problems it prints a repair prompt — regenerate "
+                    "with that and\ningest again. Do not hand-edit the image."
+                ),
+            )
+        )
+        print()
+    return 0
+
+
+def cmd_pose_ingest(args: argparse.Namespace) -> int:
+    """Validate both pose grids together and export the page-mascot bundle."""
+    root = Path(args.root).resolve()
+    paths = {}
+    for which in ("directions", "reactions"):
+        p = Path(getattr(args, which)).resolve()
+        if not p.exists():
+            _say(f"{RED}{which} sheet not found: {p}{RESET}")
+            return 1
+        paths[which] = p
+
+    name = args.job
+    if not name:
+        # Infer from where the sheets were written, so the agent can pass back
+        # exactly the paths `pose-plan` handed it.
+        parent = paths["directions"].parent
+        name = parent.name if (parent / "job.json").exists() else "mascot"
+
+    try:
+        job = PoseJob.open(root, name)
+    except FileNotFoundError:
+        job = PoseJob(root=root, spec=_pose_spec_from(args))
+        job.spec.name = name
+        job.prepare()
+
+    for which, src in paths.items():
+        dst = job.sheet_path(which)
+        if src != dst:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+
+    result = pose.process_pair(
+        job.sheet_path("directions"),
+        job.sheet_path("reactions"),
+        job,
+        strict=not args.force,
+    )
+    rep = result.report
+
+    for which, r in (("directions", rep.directions), ("reactions", rep.reactions)):
+        _say(f"{BOLD}{which:<11}{RESET}{r.found}/{r.expected} cells, {r.rows}x{r.cols}")
+    _say(f"{BOLD}anchor{RESET}     drifts {rep.anchor_drift:.1%} of character width "
+         f"{DIM}(budget {rep.max_drift:.0%}){RESET}")
+    _say(f"{BOLD}scale{RESET}      reactions at {rep.scale_match:.0%} of directions "
+         f"{DIM}(budget 90-110%){RESET}")
+
+    if result.bundle is None or (not rep.ok and not args.force):
+        _say(f"\n{RED}validation failed{RESET}")
+        if result.bundle is None and args.force:
+            _say(
+                f"  {DIM}--force cannot bypass a wrong cell count — which cell holds which "
+                f"pose is the contract, not a tolerance{RESET}"
+            )
+        for p in rep.problems():
+            _say(f"  {RED}!{RESET} {p}")
+        # Name the sheet that actually has to be redrawn. Falling back to a
+        # substring search over the whole problem list sent the agent to
+        # regenerate "reactions" for a fault measured on the directions sheet.
+        which = next(
+            (w for w in ("directions", "reactions")
+             if any(p.startswith(f"{w}:") for p in rep.problems())),
+            "reactions",
+        )
+        _say(f"\n{YELLOW}Regenerate with this follow-up, then ingest again:{RESET}\n")
+        print(prompts.pose_repair_prompt(rep.problems(), job.spec, which))
+        return 2
+
+    b = result.bundle
+    _say(f"\n{GREEN}exported{RESET} two 3x3 sheets to {b.root}")
+    _say(f"  {DIM}{b.install_hint}{RESET}\n")
+    print(b.snippet)
     return 0
 
 
@@ -409,6 +590,38 @@ def build_parser() -> argparse.ArgumentParser:
     sv.add_argument("--root", default=".", help="project root holding .mascotify/")
     sv.add_argument("--no-open", action="store_true", help="do not open a browser")
     sv.set_defaults(func=cmd_serve)
+
+    def pose_shared(sp: argparse.ArgumentParser) -> None:
+        sp.add_argument("--job", help="job name (defaults to 'mascot')")
+        sp.add_argument("--describe", default="", help="character description, for the alt text")
+        sp.add_argument("--size", type=int, default=140, help="rendered px box in the component")
+        sp.add_argument("--cutout", choices=["chroma", "matte", "alpha"], default="chroma")
+        sp.add_argument("--key-color", default="#00FF00")
+        sp.add_argument("--no-auto-key", action="store_true")
+        sp.add_argument("--root", default=".", help="project root holding .mascotify/")
+
+    po = sub.add_parser("poses", help="list the direction and reaction vocabulary")
+    po.add_argument("--json", action="store_true")
+    po.set_defaults(func=cmd_poses)
+
+    pp = sub.add_parser(
+        "pose-plan", help="prompts for the two 3x3 grids a cursor-tracking mascot needs"
+    )
+    pp.add_argument("--ref", required=True, help="approved anchor image")
+    pp.add_argument("--cell", type=int, default=512, help="target pixels per grid cell")
+    pp.add_argument("--prompt-only", action="store_true")
+    pose_shared(pp)
+    pp.set_defaults(func=cmd_pose_plan)
+
+    # Named flags rather than two positionals: swapped sheets validate perfectly
+    # and produce a mascot that turns its head when poked and changes expression
+    # when the cursor moves.
+    pi = sub.add_parser("pose-ingest", help="validate both grids together and export")
+    pi.add_argument("--directions", required=True, help="the nine head directions")
+    pi.add_argument("--reactions", required=True, help="the nine expressions")
+    pi.add_argument("--force", action="store_true", help="export even if validation failed")
+    pose_shared(pi)
+    pi.set_defaults(func=cmd_pose_ingest)
 
     s = sub.add_parser("install-skill", help="install the agent skill")
     s.add_argument("--agent", choices=["claude", "codex", "all"], default="all")

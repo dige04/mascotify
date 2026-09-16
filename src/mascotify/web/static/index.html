@@ -5,6 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>mascotify — animated mascots for your app</title>
 <link rel="stylesheet" href="/app.css">
+<script>
+  /* Inline and before the stylesheet paints: reading this from app.js would
+     show the default theme for a frame first, and a flash of the wrong one is
+     more jarring than either theme. */
+  (() => {
+    const saved = localStorage.getItem("mascotify-theme");
+    const system = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    document.documentElement.dataset.theme = saved || system;
+  })();
+</script>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🤖</text></svg>">
 </head>
 <body>
@@ -16,6 +26,10 @@
     <span class="ver" id="ver"></span>
   </div>
   <div class="bar-right">
+    <button class="chip icon" id="toggle-theme" title="Switch theme"
+            aria-label="Switch between the light and dark theme">
+      <span id="theme-mark" aria-hidden="true"></span>
+    </button>
     <button class="chip" id="open-settings">
       <span class="dot" id="key-dot"></span>
       <span id="provider-label">provider</span>
@@ -24,6 +38,32 @@
 </header>
 
 <main class="wrap">
+
+  <div class="hero">
+   <div class="hero-copy">
+    <p class="kicker">local · loopback only · your agent does the drawing</p>
+    <h1>A mascot that<br><em>actually moves.</em></h1>
+    <p class="lede">Describe a character. Get a sprite sheet, an animated WebP, Lottie, and
+      a bundle for iOS, Android, web, Unity and Godot — every frame measured, not guessed.</p>
+    <dl class="facts">
+      <div><dt>platforms</dt><dd id="fact-targets">6</dd></div>
+      <div><dt>motions</dt><dd id="fact-motions">10</dd></div>
+      <div><dt>api keys needed</dt><dd class="zero">0</dd></div>
+    </dl>
+   </div>
+
+   <!-- A live instance of what `pose-ingest` exports: two 3x3 sheets, one
+        sampled by cursor angle and one by a click. Nothing is generated here —
+        these are the files the pipeline wrote. -->
+   <!-- The cast. Every one of these is a page-mascot bundle the pipeline
+        exported; the page just loads the sheets and samples them. -->
+   <div class="demo">
+     <div class="cast" id="cast"></div>
+     <p class="demo-cap"><span class="live"></span><span id="demo-cap">poke one</span></p>
+   </div>
+  </div>
+
+  <div class="spine">
 
   <!-- ── step 1 ─────────────────────────────────────────── -->
   <section class="step" id="s1">
@@ -110,7 +150,13 @@
 
     <div class="cols">
       <figure class="canvas stage">
-        <div class="empty" id="preview-empty"><span>preview appears here</span></div>
+        <div class="empty" id="preview-empty">
+          <span>preview appears here</span>
+          <div class="targets">
+            <span>web</span><span>ios</span><span>android</span>
+            <span>unity</span><span>godot</span><span>lottie</span>
+          </div>
+        </div>
         <img id="preview-img" alt="Your animated mascot" hidden>
         <figcaption id="preview-cap"></figcaption>
       </figure>
@@ -127,6 +173,7 @@
     </div>
   </section>
 
+  </div>
 </main>
 
 <footer class="foot">

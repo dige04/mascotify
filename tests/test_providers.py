@@ -382,3 +382,70 @@ def test_redactor_ignores_values_too_short_to_be_secrets():
 def test_every_request_identifies_the_client(stub):
     images.generate("gemini", prompt="p", key="k", model="m")
     assert net.USER_AGENT.startswith("mascotify/")
+
+
+# ─── result downloads ──────────────────────────────────────────────────────
+
+
+class _Body:
+    """The slice of httpx's streaming response that `_stream` actually uses."""
+
+    def __init__(self, status, chunks=(b"\x89PNG", b"rest"), ctype="image/png"):
+        self.status_code, self._chunks = status, chunks
+        self.headers = {"Content-Type": ctype}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
+
+    def iter_bytes(self):
+        yield from self._chunks
+
+
+class _Client:
+    def __init__(self, *bodies):
+        self.bodies, self.calls = list(bodies), 0
+
+    def stream(self, _method, _url, **_kw):
+        self.calls += 1
+        return self.bodies.pop(0)
+
+
+def test_a_result_download_retries_a_transient_status():
+    waits = []
+    c = _Client(_Body(502), _Body(503), _Body(200))
+    out = net.download(
+        c, "u", provider="fal", redact=net.Redactor(), timeout=1, sleep=waits.append
+    )
+    assert out == b"\x89PNGrest"
+    assert c.calls == 3
+    assert len(waits) == 2, "each retry should back off"
+
+
+def test_a_retried_download_does_not_keep_the_failed_body():
+    """The sink resets per attempt, so an error page cannot be prefixed."""
+    c = _Client(_Body(502, chunks=(b"<html>error</html>",)), _Body(200))
+    out = net.download(
+        c, "u", provider="fal", redact=net.Redactor(), timeout=1, sleep=lambda _: None
+    )
+    assert out == b"\x89PNGrest"
+
+
+def test_a_download_gives_up_and_names_the_provider():
+    c = _Client(*[_Body(503) for _ in range(3)])
+    with pytest.raises(net.HttpError, match="fal result URL"):
+        net.download(
+            c, "u", provider="fal", redact=net.Redactor(),
+            timeout=1, attempts=3, sleep=lambda _: None,
+        )
+    assert c.calls == 3
+
+
+def test_a_download_does_not_retry_a_wrong_content_type():
+    """An HTML error page is a settled answer, not a hiccup."""
+    c = _Client(_Body(200, ctype="text/html"))
+    with pytest.raises(net.HttpError, match="rather than image/"):
+        net.download(c, "u", provider="fal", redact=net.Redactor(), timeout=1)
+    assert c.calls == 1

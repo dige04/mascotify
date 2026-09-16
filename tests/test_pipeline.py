@@ -456,3 +456,74 @@ def test_animation_defaults_to_lossy_and_is_much_smaller(tmp_path):
     out = Image.open(lossy)
     assert out.n_frames == 12
     assert out.mode in {"RGBA", "RGBX", "P"}, "alpha must survive the lossy path"
+
+
+def test_reexporting_one_target_leaves_the_others_alone(tmp_path):
+    """`--targets` exports a subset, so a rerun must not wipe the rest.
+
+    The stale-export fix clears what it is about to rewrite. Clearing the whole
+    export directory instead would delete a bundle the caller never asked to
+    rebuild and never asked to lose.
+    """
+    from mascotify import pipeline
+
+    sheet = tmp_path / "sheet.png"
+    make_sheet().save(sheet)
+    job = pipeline.Job(root=tmp_path, spec=JobSpec(sheet=SheetSpec(rows=3, cols=4)), name="wave")
+
+    pipeline.process(sheet, job, targets=("web",))
+    assert (job.out_dir / "web").is_dir()
+
+    pipeline.process(sheet, job, targets=("godot",))
+    assert (job.out_dir / "godot").is_dir()
+    assert (job.out_dir / "web").is_dir(), "a target nobody rebuilt must survive"
+
+
+def test_rerunning_a_target_drops_its_stale_frames(tmp_path):
+    """iOS writes one .imageset per frame, so a shorter rerun has to clear."""
+    from mascotify import pipeline
+
+    big, small = tmp_path / "big.png", tmp_path / "small.png"
+    make_sheet(rows=3, cols=4).save(big)
+    make_sheet(rows=1, cols=2).save(small)
+    assets = tmp_path / ".mascotify" / "wave" / "export" / "ios" / "Mascot.xcassets"
+
+    job = pipeline.Job(root=tmp_path, spec=JobSpec(sheet=SheetSpec(rows=3, cols=4)), name="wave")
+    pipeline.process(big, job, targets=("ios",))
+    assert len(list(assets.glob("*.imageset"))) == 12
+
+    job.spec = JobSpec(sheet=SheetSpec(rows=1, cols=2))
+    pipeline.process(small, job, targets=("ios",))
+    assert len(list(assets.glob("*.imageset"))) == 2, "frames 3-12 belong to a dead generation"
+
+
+# ─── the page-mascot component ─────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "job,ident",
+    [("fox", "Fox"), ("robot-wave", "RobotWave"), ("my_fox 2", "MyFox2"), ("3d", "M3d"), ("..", "Mascot")],
+)
+def test_the_component_name_is_a_valid_js_identifier(job, ident):
+    """`capitalize` turned `robot-wave` into `Robot-waveMascot`, which is not a
+    name any bundler will accept."""
+    from mascotify.export.page_mascot import _component
+
+    assert _component(job) == ident
+
+
+def test_a_quote_in_the_description_cannot_break_the_component(tmp_path):
+    """--describe is free text and lands in a JSX attribute."""
+    from PIL import Image
+
+    from mascotify.export.page_mascot import export_page_mascot
+    from mascotify.imaging.pack import pack
+
+    frames = [Image.new("RGBA", (20, 20), (255, 0, 0, 255)) for _ in range(9)]
+    atlas = pack(frames, fps=1, cols=3)
+    b = export_page_mascot(atlas, atlas, tmp_path, "fox", label='a "chibi" <fox>')
+
+    assert '"chibi"' not in b.snippet, "a raw quote would end the attribute"
+    assert "&quot;chibi&quot;" in b.snippet and "&lt;fox&gt;" in b.snippet
+    tsx = next(p for p in b.files if p.suffix == ".tsx").read_text()
+    assert 'label="a &quot;chibi&quot; &lt;fox&gt;"' in tsx
