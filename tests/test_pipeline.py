@@ -495,3 +495,35 @@ def test_rerunning_a_target_drops_its_stale_frames(tmp_path):
     job.spec = JobSpec(sheet=SheetSpec(rows=1, cols=2))
     pipeline.process(small, job, targets=("ios",))
     assert len(list(assets.glob("*.imageset"))) == 2, "frames 3-12 belong to a dead generation"
+
+
+# ─── the page-mascot component ─────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "job,ident",
+    [("fox", "Fox"), ("robot-wave", "RobotWave"), ("my_fox 2", "MyFox2"), ("3d", "M3d"), ("..", "Mascot")],
+)
+def test_the_component_name_is_a_valid_js_identifier(job, ident):
+    """`capitalize` turned `robot-wave` into `Robot-waveMascot`, which is not a
+    name any bundler will accept."""
+    from mascotify.export.page_mascot import _component
+
+    assert _component(job) == ident
+
+
+def test_a_quote_in_the_description_cannot_break_the_component(tmp_path):
+    """--describe is free text and lands in a JSX attribute."""
+    from PIL import Image
+
+    from mascotify.export.page_mascot import export_page_mascot
+    from mascotify.imaging.pack import pack
+
+    frames = [Image.new("RGBA", (20, 20), (255, 0, 0, 255)) for _ in range(9)]
+    atlas = pack(frames, fps=1, cols=3)
+    b = export_page_mascot(atlas, atlas, tmp_path, "fox", label='a "chibi" <fox>')
+
+    assert '"chibi"' not in b.snippet, "a raw quote would end the attribute"
+    assert "&quot;chibi&quot;" in b.snippet and "&lt;fox&gt;" in b.snippet
+    tsx = next(p for p in b.files if p.suffix == ".tsx").read_text()
+    assert 'label="a &quot;chibi&quot; &lt;fox&gt;"' in tsx

@@ -334,3 +334,36 @@ def test_an_oversized_pair_is_capped_and_stays_square(tmp_path):
     sheet = next(p for p in result.bundle.files if p.name.endswith("-directions.webp"))
     with Image.open(sheet) as im:
         assert im.size == (3 * MAX_CELL, 3 * MAX_CELL)
+
+
+# ─── job names ─────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "typed,lands_on",
+    [("fox", "fox"), ("My_Fox", "my-fox"), ("../../outside", "outside"), ("..", "mascot")],
+)
+def test_a_pose_job_name_is_normalised_before_it_addresses_a_path(tmp_path, typed, lands_on):
+    """The motion path sanitised at its boundary and this one did not.
+
+    Two consequences, both real: `../../outside` addressed a directory outside
+    the workspace, and a name like `My_Fox` was one the web app would list from
+    disk but then refuse to serve, because listing reads directory names and
+    serving validates them.
+    """
+    from mascotify.pose import PoseJob
+    from mascotify.spec import PoseJobSpec
+
+    job = PoseJob(root=tmp_path, spec=PoseJobSpec(name=typed))
+    assert job.name == lands_on
+    assert job.dir == tmp_path / ".mascotify" / "poses" / lands_on
+    assert tmp_path in job.dir.parents, "never outside the workspace"
+
+
+def test_a_pose_job_reopens_under_the_name_it_was_written_with(tmp_path):
+    from mascotify.pose import PoseJob
+    from mascotify.spec import PoseJobSpec
+
+    PoseJob(root=tmp_path, spec=PoseJobSpec(name="My_Fox", character="a fox")).prepare()
+    assert PoseJob.open(tmp_path, "My_Fox").spec.character == "a fox"
+    assert PoseJob.open(tmp_path, "my-fox").spec.character == "a fox"

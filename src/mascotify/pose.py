@@ -26,6 +26,7 @@ from .export.targets import Bundle
 from .imaging import grid, normalize as nz
 from .imaging.cutout import alpha_bbox, cut_out
 from .imaging.pack import Atlas, pack
+from .pipeline import job_name
 from .spec import PoseJobSpec
 
 WORKSPACE = ".mascotify"
@@ -45,7 +46,15 @@ class PoseJob:
 
     @property
     def name(self) -> str:
-        return self.spec.name
+        """The directory name, which is not whatever was typed.
+
+        The motion path sanitises at its boundary and this one did not, so
+        `--job ../../x` addressed a directory outside the workspace, and a name
+        the web app could list but not then serve — /api/cast reads directory
+        names, /api/cast/{job} validates them, and the two disagreed.
+        Normalising here means every writer and reader agrees by construction.
+        """
+        return job_name(self.spec.name)
 
     @property
     def dir(self) -> Path:
@@ -65,7 +74,7 @@ class PoseJob:
 
     @classmethod
     def open(cls, root: Path, name: str) -> "PoseJob":
-        d = root / WORKSPACE / "poses" / name
+        d = root / WORKSPACE / "poses" / job_name(name)
         if not (d / "job.json").exists():
             raise FileNotFoundError(
                 f"no pose job named {name!r} under {root / WORKSPACE / 'poses'} — "

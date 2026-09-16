@@ -169,6 +169,11 @@ REACTIONS: dict[str, str] = {
 
 POSE_SETS = ("directions", "reactions")
 
+# The half-lidded pose. Held for a tenth of a second it reads as a blink, which
+# is why an idle character borrows it rather than needing a tenth expression.
+# Named rather than indexed because the order above is free.
+BLINK_POSE = "sleepy"
+
 
 @dataclass(frozen=True)
 class PoseSpec:

@@ -362,7 +362,6 @@ function wireCast() {
   // committing at the distance that looks right for their size.
   const REACH = 2.1;
   const IDLE_AFTER = 2400;         // stillness before they start looking around
-  const BLINK = 4;                 // the half-lidded cell, held briefly
   const fine = matchMedia("(pointer: fine)").matches;
   const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -371,6 +370,10 @@ function wireCast() {
 
   function make(el) {
     const sheets = { dir: el.dataset.directions, rea: el.dataset.reactions };
+    // Which reactions cell is half-lidded. Told by the server, because the
+    // order of that sheet is free and an index hardcoded here would silently
+    // become the wrong expression the day it changes.
+    const blinkCell = Number(el.dataset.blink ?? 4);
     el.style.backgroundImage = `url("${sheets.dir}")`;
     let cell = 4, reacting = 0;
 
@@ -411,12 +414,18 @@ function wireCast() {
     /* Blink. The reactions sheet has no blink of its own — its nine cells are
        the exported contract — but the half-lidded cell held for a tenth of a
        second reads as one, and costs no extra art. */
+    let blinking = 0;
     const blink = () => {
       if (!reacting) {
         const back = cell;
         sheet("rea");
-        at(BLINK);
-        setTimeout(() => {
+        at(blinkCell);
+        // Guarded on the way out: a click landing inside these 120ms used to
+        // have its reaction overwritten by this restore, leaving the mascot
+        // stuck on a stale direction cell until the click's own timer fired.
+        blinking = setTimeout(() => {
+          blinking = 0;
+          if (reacting) return;
           sheet("dir");
           at(back);
         }, 120);
@@ -426,6 +435,8 @@ function wireCast() {
 
     el.addEventListener("click", () => {
       clearTimeout(reacting);
+      clearTimeout(blinking);
+      blinking = 0;
       sheet("rea");
       at(Math.floor(Math.random() * 9));
       if (!still) {
@@ -480,7 +491,8 @@ wireCast();
   if (!host) return;
 
   const BUNDLED = [{ id: "", alt: "A teal and cream robot that watches your cursor",
-                     dir: "/mascot-directions.webp", rea: "/mascot-reactions.webp" }];
+                     dir: "/mascot-directions.webp", rea: "/mascot-reactions.webp",
+                     blink: 4 }];
   let list = BUNDLED;
   try {
     const found = await (await fetch("/api/cast")).json();
@@ -497,7 +509,8 @@ wireCast();
       (c, i) => `<figure>
         <div class="bob" style="animation-delay:${(-i * 0.7).toFixed(2)}s">
           <div class="demo-mascot" role="img" aria-label="${c.alt.replace(/"/g, "&quot;")}"
-               data-directions="${c.dir}" data-reactions="${c.rea}"></div>
+               data-directions="${c.dir}" data-reactions="${c.rea}"
+               data-blink="${c.blink ?? 4}"></div>
         </div></figure>`,
     )
     .join("");

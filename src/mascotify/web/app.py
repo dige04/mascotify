@@ -37,7 +37,9 @@ from ..imaging import normalize as nz
 from ..imaging.cutout import cut_out
 from ..pipeline import Job
 from ..spec import (
+    BLINK_POSE,
     MOTIONS,
+    REACTIONS,
     POSE_SETS,
     CutoutSpec,
     JobSpec,
@@ -390,6 +392,11 @@ def create_app(root: Path | None = None, *, allow_hosts: set[str] | None = None)
         base = state.root / pose.WORKSPACE / "poses"
         if not base.is_dir():
             return []
+        # Which cell the idle blink borrows. Reactions cell order is explicitly
+        # free, so the client must be told rather than assume an index — a
+        # hardcoded 4 turns the blink into heart-eyes the day REACTIONS is
+        # reordered, and nothing validates which expression landed where.
+        blink = list(REACTIONS).index(BLINK_POSE)
         out = []
         for d in sorted(base.iterdir()):
             spec = d / "job.json"
@@ -403,7 +410,9 @@ def create_app(root: Path | None = None, *, allow_hosts: set[str] | None = None)
                 described = PoseJobSpec.load(spec).character
             except (OSError, ValueError):
                 described = ""
-            out.append({"id": name, "alt": described or f"{name} mascot"})
+            out.append(
+                {"id": name, "alt": described or f"{name} mascot", "blink": blink}
+            )
         return out
 
     @app.get("/api/cast/{job}/{which}")

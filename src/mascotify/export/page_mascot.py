@@ -13,12 +13,33 @@ Upstream: https://github.com/nilbuild/page-mascot
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from ..imaging.pack import Atlas
 from .targets import Bundle, _write
 
 PACKAGE = "page-mascot"
+
+
+def _component(name: str) -> str:
+    """A job name as a JS identifier.
+
+    `str.capitalize` was enough until a job was called `robot-wave`, which it
+    turned into `Robot-waveMascot` — a name that does not compile.
+    """
+    parts = [p for p in re.split(r"[^0-9a-zA-Z]+", name) if p]
+    ident = "".join(p[:1].upper() + p[1:] for p in parts) or "Mascot"
+    return ident if not ident[0].isdigit() else f"M{ident}"
+
+
+def _attr(text: str) -> str:
+    """Escape for a JSX attribute. JSX decodes HTML entities in these, so a
+    description containing a quote stays readable instead of ending the
+    attribute early and breaking the file it is written into."""
+    for raw, entity in (("&", "&amp;"), ('"', "&quot;"), ("<", "&lt;"), (">", "&gt;")):
+        text = text.replace(raw, entity)
+    return text
 
 
 def _sheet(atlas: Atlas, path: Path) -> Path:
@@ -57,12 +78,12 @@ def export_page_mascot(
         f'  directions="/mascots/{name}-directions.webp"\n'
         f'  reactions="/mascots/{name}-reactions.webp"\n'
         f"  size={{{base_px}}}\n"
-        f'  label="{alt}"\n'
+        f'  label="{_attr(alt)}"\n'
         "/>"
     )
 
     usage = _write(
-        root / f"{name.capitalize()}Mascot.tsx",
+        root / f"{_component(name)}Mascot.tsx",
         f"""import {{ Mascot }} from '{PACKAGE}'
 
 /**
@@ -75,7 +96,7 @@ def export_page_mascot(
  * Copy the two .webp files into `public/mascots/`, or import them and pass the
  * resolved URLs — the props are whatever your app serves.
  */
-export function {name.capitalize()}Mascot() {{
+export function {_component(name)}Mascot() {{
   return (
     {snippet.replace(chr(10), chr(10) + "    ")}
   )
