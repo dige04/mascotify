@@ -75,6 +75,13 @@ async function loadConfig() {
       ? `Each generation calls ${c.provider} on your key — roughly $${cost.toFixed(2)} an image.`
       : `Add a ${c.provider} key in settings before generating.`;
 
+  // From the server, not typed into the markup. Two numbers describing how
+  // many things the tool supports are exactly the kind that go quietly stale
+  // the first time one is added.
+  const fact = (id, n) => { const e = $(id); if (e) e.textContent = n; };
+  fact("fact-motions", Object.keys(c.motions).length);
+  fact("fact-targets", (c.targets || []).length);
+
   $("motions").innerHTML = Object.entries(c.motions)
     .map(
       ([k, v]) =>
