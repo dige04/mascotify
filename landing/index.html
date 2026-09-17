@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mascotify — animated mascots for your app, no API key</title>
+<meta name="description" content="Turn one character image into production-ready animated mascot assets: sprite sheets, Lottie, and bundles for iOS, Android, web, Unity and Godot. Open source, runs locally, drawn by the coding agent you already have.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🤖</text></svg>">
+<meta property="og:title" content="mascotify — animated mascots for your app">
+<meta property="og:description" content="One character image in, production-ready animation out. Open source, no API key.">
+<meta property="og:type" content="website">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+
+<header class="nav">
+  <a class="brand" href="#top"><span class="mark" aria-hidden="true"></span> mascotify</a>
+  <nav>
+    <a href="#how">How</a>
+    <a href="#validate">Validation</a>
+    <a href="#export">Exports</a>
+    <a class="cta" href="https://github.com/dige04/mascotify">GitHub</a>
+  </nav>
+</header>
+
+<main id="top">
+
+  <section class="hero">
+    <div class="hero-copy">
+      <p class="kicker">Open source · MIT · Runs on your machine</p>
+      <h1>Animated mascots for your app,<br><em>without an API key.</em></h1>
+      <p class="lede">
+        Describe a character. Get a looping sprite animation and the platform bundles
+        to ship it — Xcode imageset with a SwiftUI view, Android WebP with the Kotlin
+        to play it, CSS <code>steps()</code>, Unity, Godot, Lottie.
+      </p>
+      <div class="actions">
+        <a class="btn primary" href="https://github.com/dige04/mascotify">Get it on GitHub</a>
+        <a class="btn" href="#how">See how it works</a>
+      </div>
+      <p class="fine">
+        The default provider is the coding agent you already have signed in. Nothing
+        charged, nothing configured.
+      </p>
+    </div>
+
+    <figure class="hero-art">
+      <div class="checker">
+        <img src="./assets/mascot.webp" width="391" height="452"
+             alt="A cream and teal robot mascot waving, looping, on a transparent background">
+      </div>
+      <figcaption>12 frames · 12 fps · transparent · generated and validated by mascotify</figcaption>
+    </figure>
+  </section>
+
+  <section class="strip">
+    <div><b>0</b><span>API keys needed</span></div>
+    <div><b>6</b><span>platform bundles</span></div>
+    <div><b>1</b><span>image in</span></div>
+    <div><b>MIT</b><span>do what you like</span></div>
+  </section>
+
+  <section id="how" class="band">
+    <h2>Three commands</h2>
+    <p class="sub">Or one sentence to your agent — the skill drives all of it.</p>
+
+    <ol class="steps">
+      <li>
+        <h3><span>anchor</span> Lock the character</h3>
+        <p>One canonical still, approved once. Every animation is drawn from it, which is
+          what keeps the mascot recognisably itself across screens.</p>
+        <pre><code>mascotify anchor "a rounded robot,
+  big visor eye, teal and cream"</code></pre>
+      </li>
+      <li>
+        <h3><span>plan</span> Pick a motion</h3>
+        <p>Ten motions that survive being drawn a dozen times — the character stays planted
+          and the camera never moves. Walking and turning drift badly; those are left out
+          on purpose.</p>
+        <pre><code>mascotify plan --ref ref.png --action wave</code></pre>
+      </li>
+      <li>
+        <h3><span>ingest</span> Ship it</h3>
+        <p>Keys out the backdrop, finds the frames, normalises them onto one canvas, packs,
+          and writes every bundle with the snippet that plays it.</p>
+        <pre><code>mascotify ingest .mascotify/wave/sheet.png</code></pre>
+      </li>
+    </ol>
+
+    <div class="alt-route">
+      <h3>Prefer a UI?</h3>
+      <pre><code>mascotify serve   <span class="c"># http://127.0.0.1:8765</span></code></pre>
+      <p>Same pipeline behind a local web app. It binds to loopback and refuses any request
+        whose <code>Host</code> or <code>Origin</code> is not your machine.</p>
+    </div>
+  </section>
+
+  <section id="validate" class="band alt">
+    <div class="split">
+      <div>
+        <h2>It checks its own homework</h2>
+        <p class="sub">Image models lay out a grid by eye. Every generation gets measured,
+          and a failure comes back as a repair prompt rather than a broken asset.</p>
+
+        <ul class="checks">
+          <li><b>Frame count</b> — a merged or split cell means the grid was misread</li>
+          <li><b>Canvas clipping</b> — the most common failure: models fill edge to edge and
+            amputate the bottom row</li>
+          <li><b>Scale drift</b> — the character must not change size between cells</li>
+          <li><b>Loop seam</b> — decides on its own whether ping-pong is needed</li>
+        </ul>
+
+        <p class="proof">
+          The defect that motivated all of this: asked for a 12-frame grid with baseline and
+          scale invariants but <em>no margin rule</em>, the model amputated the bottom row.
+          One numeric constraint later —
+        </p>
+
+        <table class="metrics">
+          <thead><tr><th></th><th>before</th><th>after</th></tr></thead>
+          <tbody>
+            <tr><td>size spread</td><td class="bad">4.6%</td><td class="good">0.5%</td></tr>
+            <tr><td>clipped frames</td><td class="bad">9, 10, 11, 12</td><td class="good">none</td></tr>
+            <tr><td>loop seam</td><td class="bad">1.0×</td><td class="good">0.14×</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <figure class="sheet">
+        <img src="./assets/sheet.jpg" width="1100" height="825" loading="lazy"
+             alt="A 4 by 3 grid of twelve frames of the same robot mascot waving, on a flat green background">
+        <figcaption>A real sheet that passed: 12/12 frames, 0.5% size spread, nothing clipped.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section id="export" class="band">
+    <h2>Every bundle carries the code that runs it</h2>
+    <p class="sub">A sprite sheet with no playback code is a puzzle, and every platform
+      solves it differently enough to waste an afternoon.</p>
+
+    <div class="grid">
+      <article><h4>iOS</h4><code>MascotSprite()</code>
+        <p>Xcode <code>.imageset</code> per frame at @1x/@2x/@3x, plus a SwiftUI view that
+          honours Reduce Motion.</p></article>
+      <article><h4>Android</h4><code>mascotView.playMascot()</code>
+        <p>Animated WebP in <code>res/drawable</code> and the Kotlin extension to start it.</p></article>
+      <article><h4>Web</h4><code>&lt;div class="wave"&gt;&lt;/div&gt;</code>
+        <p>Animated WebP and a CSS <code>steps()</code> sheet with a
+          <code>prefers-reduced-motion</code> block.</p></article>
+      <article><h4>Unity</h4><code>Slice at 391×452</code>
+        <p>Sheet plus the slice metadata and a <code>MonoBehaviour</code> that plays it.</p></article>
+      <article><h4>Godot</h4><code>load("res://wave_frames.tres")</code>
+        <p>A <code>SpriteFrames</code> resource with an AtlasTexture per frame.</p></article>
+      <article><h4>Lottie</h4><code>&lt;lottie-player src="wave.json"&gt;</code>
+        <p>Frames embedded as base64 — raster in a Lottie container, and the docs say so.</p></article>
+    </div>
+  </section>
+
+  <section class="band alt honest">
+    <h2>What it does not do</h2>
+    <div class="grid two">
+      <article>
+        <h4>No automated identity check</h4>
+        <p>Three cheap metrics were measured against real drift and all three failed.
+          Silhouette IoU was <em>worse</em> than its own noise floor — an arm raised versus
+          lowered moves the outline more than a changed design does. Palette and aspect
+          ranked the same two generations in opposite orders.</p>
+        <p>So there is no verdict. <code>mascotify compare</code> size-matches the anchor
+          beside the frames and hands the judgement to someone with eyes.</p>
+      </article>
+      <article>
+        <h4>No hosted version</h4>
+        <p>The free path works because it drives <em>your</em> signed-in agent. On a server
+          that route disappears and everyone needs a key — so the hosted build would be
+          worse at the thing that makes this worth using.</p>
+        <p>It stays local. Nobody holds your secrets, and nothing is metered.</p>
+      </article>
+    </div>
+  </section>
+
+  <section class="close">
+    <h2>Install</h2>
+    <pre class="wide"><code>uv tool install "git+https://github.com/dige04/mascotify"
+mascotify install-skill      <span class="c"># teach your agent to drive it</span></code></pre>
+    <p>Then, in your agent: <em>“make me a waving robot mascot for this app.”</em></p>
+    <a class="btn primary big" href="https://github.com/dige04/mascotify">Read the source</a>
+    <p class="fine">
+      mascotify is MIT. What you generate with it is governed by whichever model drew it —
+      check those terms before shipping a mascot as a brand asset.
+    </p>
+  </section>
+
+</main>
+
+<footer>
+  <span>Built by <a href="https://hieudinh.dev">Hieu Dinh</a></span>
+  <span><a href="https://github.com/dige04/mascotify">github.com/dige04/mascotify</a></span>
+</footer>
+
+</body>
+</html>

@@ -4,14 +4,17 @@ Turn one character image into production-ready animated mascot assets — sprite
 sheets, animated WebP, Lottie, and bundles for iOS, Android, web, Unity and
 Godot.
 
-**No API key on the CLI path.** Your coding agent is the image provider:
+**[hieudinh.dev/tools/mascotify](https://hieudinh.dev/tools/mascotify/)** — what it
+does, in one page.
+
+**No API key.** Your coding agent is the image provider:
 mascotify compiles the prompt, the agent's own image tool draws it, mascotify
 measures the result and exports it. Codex's built-in `image_gen`, or any agent
 that can generate an image, is enough.
 
-The web app is the exception — a browser has no agent to draw with, so
-`mascotify serve` wants a provider key unless you feed it a sheet you already
-generated.
+The web app uses the same route: `mascotify serve` shells out to your agent's
+CLI, so it needs no key either. Keyed providers stay available for people who
+would rather pay to skip the minute an agent turn costs.
 
 ```bash
 uv tool install git+https://github.com/dige04/mascotify.git
